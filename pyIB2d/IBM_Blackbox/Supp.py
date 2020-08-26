@@ -53,8 +53,8 @@ from numba import jit
 #
 ################################################################################
 
-def please_Move_Lagrangian_Point_Positions(u, v, xL_P, yL_P, xL_H, yL_H, x, y,\
-    dt, grid_Info,porous_Yes):
+def please_Move_Lagrangian_Point_Positions(mu, u, v, xL_P, yL_P, xL_H, yL_H, x, y,\
+    dt, grid_Info,porous_Yes,poroelastic_Yes,poroelastic_info,F_Poro):
     ''' Moves Lagrangian point positions
         u: 2D array
         v: 2D array
@@ -74,15 +74,15 @@ def please_Move_Lagrangian_Point_Positions(u, v, xL_P, yL_P, xL_H, yL_H, x, y,\
 
 
     # Grid Info. grid_Info is a dict
-    Nx =   grid_Info['Nx']
-    Ny =   grid_Info['Ny']
-    Lx =   grid_Info['Lx']
-    Ly =   grid_Info['Ly']
-    dx =   grid_Info['dx']
-    dy =   grid_Info['dy']
-    supp = grid_Info['supp']
-    Nb =   grid_Info['Nb']
-    ds =   grid_Info['ds']
+    Nx =   grid_Info[0]
+    Ny =   grid_Info[1]
+    Lx =   grid_Info[2]
+    Ly =   grid_Info[3]
+    dx =   grid_Info[4]
+    dy =   grid_Info[5]
+    supp = int(grid_Info[6])
+    Nb =   grid_Info[7]
+    ds =   grid_Info[8]
 
 
     # Find indices where the delta-function kernels are non-zero for both x and y.
@@ -96,10 +96,15 @@ def please_Move_Lagrangian_Point_Positions(u, v, xL_P, yL_P, xL_H, yL_H, x, y,\
     xL_H_ReSize = np.tile(xLH_aux,(supp**2,1)).T
     yL_H_ReSize = np.tile(yLH_aux,(supp**2,1)).T
 
+
     # Finds distance between specified Eulerian data and nearby Lagrangian data
     # x is a 1D array. x[xInds] is a 2D array of values in x
-    distX = give_Eulerian_Lagrangian_Distance(x[xInds], xL_H_ReSize, Lx)
-    distY = give_Eulerian_Lagrangian_Distance(y[yInds], yL_H_ReSize, Ly)
+    if ( np.isscalar(xL_P) ):
+        distX = give_Eulerian_Lagrangian_Distance(x[xInds], xL_H_ReSize, Lx)
+        distY = give_Eulerian_Lagrangian_Distance(y[yInds], yL_H_ReSize, Ly)
+    else:
+        distX = give_Eulerian_Lagrangian_Distance(x[xInds], xL_H_ReSize, Lx)
+        distY = give_Eulerian_Lagrangian_Distance(y[yInds], yL_H_ReSize, Ly)
 
     # Obtain the Dirac-delta function values.
     delta_X = give_Delta_Kernel(distX, dx)
@@ -111,6 +116,16 @@ def please_Move_Lagrangian_Point_Positions(u, v, xL_P, yL_P, xL_H, yL_H, x, y,\
     # Update the Lagrangian Point Position.
     xL_Next = xL_P + (dt) * move_X
     yL_Next = yL_P + (dt) * move_Y
+
+    # Update the Lagrangian Point Positions with poroelasticity.
+    if poroelastic_Yes:
+        #
+        # poroelastic_info[:,1]: index of poroelastic point
+        # poroelastic_info[:,2]: Brinkman constant
+        #
+        xL_Next[poroelastic_info[0:,0].astype(int)] = xL_Next[poroelastic_info[0:,0].astype(int)] + (  1/(mu*poroelastic_info[0:,1]) * F_Poro[0:,0] ) * dt
+        yL_Next[poroelastic_info[0:,0].astype(int)] = yL_Next[poroelastic_info[0:,0].astype(int)] + (  1/(mu*poroelastic_info[0:,1]) * F_Poro[0:,1] ) * dt
+
 
 
     # Shift so that all values are in [0,Lx or Ly).
@@ -259,11 +274,19 @@ def give_Delta_Kernel(x,dx):
             
             r = RMAT[ii,jj]
             
+            # Approximate Discrete Delta Function
+            #if r <= 2:
+            #    delta[ii,jj] = 0.25*( 1 + cos(pi*r/2) )    
+            #else:
+            #    delta[ii,jj] = 0        
+
+            # PESKIN 4-Point Discrete Delta Function
             if r<1:
                 delta[ii,jj] = ( (3 - 2*r + sqrt(1 + 4*r - 4*r*r) ) / (8*dx) )
             elif (r<2) and (r>=1):
                 delta[ii,jj] = ( (5 - 2*r - sqrt(-7 + 12*r - 4*r*r) ) / (8*dx) )
-
+            else:
+                delta[ii,jj] = 0
     return delta
 
 
@@ -413,10 +436,12 @@ def D(u,dz,string):
     Returns:
         u_z:'''
 
-    length = u.shape[0]
-    u_z = np.zeros((length,length))
+    
+    u_z = np.zeros(u.shape)
 
     if string=='x':
+
+        length = u.shape[1]      # number of pts along X direction
 
         #For periodicity on ends
         u_z[:,0] = ( u[:,1] - u[:,length-1] ) / (2*dz)
@@ -427,6 +452,8 @@ def D(u,dz,string):
 
     elif string=='y':
         
+        length = u.shape[0]      # number of pts along Y direction
+
         #For periodicity on ends
         u_z[0,:] = ( u[1,:] - u[length-1,:] ) / (2*dz)
         u_z[length-1,:] = ( u[0,:] - u[length-2,:] ) / (2*dz)
@@ -461,10 +488,12 @@ def DD(u,dz,string):
     Returns:
         u_zz:'''
 
-    length = u.shape[0]
-    u_zz = np.zeros((length,length))
+    u_zz = np.zeros(u.shape)
 
     if string=='x':
+
+        length = u.shape[1]      # number of pts along X direction
+
 
         #For periodicity on ends
         u_zz[:,0] =  ( u[:,1] - 2*u[:,0]   + u[:,length-1] )   / (dz**2)
@@ -475,6 +504,8 @@ def DD(u,dz,string):
                                 / (dz**2)
 
     elif string=='y':
+
+        length = u.shape[0]      # number of pts along Y direction
 
         #For periodicity on ends
         u_zz[0,:] =  ( u[1,:] - 2*u[0,:]   + u[length-1,:] )   / (dz**2)
@@ -495,11 +526,163 @@ def DD(u,dz,string):
 
 ###########################################################################
 #
-# FUNCTION: Setting up advection-diffusion solver
+# def: Setting up advection-diffusion solver
 #
 ###########################################################################
 
 def please_Update_Adv_Diff_Concentration(C,dt,dx,dy,uX,uY,k):
+
+    # C:     concentration 
+    # dt:    time-step
+    # dx,dy: spatial steps in x and y, respectively
+    # uX:    x-Component of Velocity
+    # uY:    y-Component of Velocity
+    # k:     diffusion coefficient
+
+
+    # Performs Upwind Advection WITHOUT Time-Splitting
+    #C = perform_Time_noSplit_Upwind(C,dt,dx,dy,uX,uY,k)
+
+    # Performs Upwind Advection w/ Time-Splitting
+    C = perform_Time_Split_Upwind(C,dt,dx,dy,uX,uY,k)
+
+    #laplacian_C=1 # DUMMY VARIABLE (laplacian not used anywhere else in code.)
+
+    return C
+
+###########################################################################
+#
+# def: Advection-Diffusion Split Upwind Method
+#
+###########################################################################
+
+def perform_Time_noSplit_Upwind(C,dt,dx,dy,uX,uY,k):
+
+    # Compute Necessary Derivatives (Note: these calculations could be parallalized)
+    Cx = give_Necessary_Derivative(C,dx,uX,'x')
+    Cy = give_Necessary_Derivative(C,dy,uY,'y') 
+    Cxx = DD(C,dx,'x')
+    Cyy = DD(C,dy,'y')
+
+    # Forms Laplacian
+    laplacian_C = Cxx+Cyy
+
+    # UPWIND
+    C = C + dt * ( k*(laplacian_C) - uX*Cx - uY*Cy )
+
+    return C
+
+###########################################################################
+#
+# def: Advection-Diffusion Split Upwind Method
+#
+###########################################################################
+
+def perform_Time_Split_Upwind(C,dt,dx,dy,uX,uY,k):
+
+    # Compute Necessary Derivatives for x-Advection 
+    Cx = give_Necessary_Derivative(C,dx,uX,'x')
+    Cxx = DD(C,dx,'x')
+
+    # Time-step #1 (give auxillary)
+    C = C + dt * ( k*(Cxx) - uX*Cx )
+
+    # Compute Necessary Derivatives for y-Advection 
+    Cy = give_Necessary_Derivative(C,dy,uY,'y') 
+    Cyy = DD(C,dy,'y')
+
+    # Time-step #2 (give next iteration)
+    C = C + dt * ( k*(Cyy) - uY*Cy )
+
+    return C
+
+
+###########################################################################
+#
+# def: Computes derivative based on sign of Velocity, u, using UPWIND
+# approach
+#
+###########################################################################
+
+def give_Necessary_Derivative(C,dz,uZ,string):
+
+    C_z = np.zeros(C.shape)
+    signs = np.sign(uZ)
+    [lenY,lenX] = uZ.shape
+
+    if string=='x':
+
+        #For periodicity on ends w/ UPWIND
+        for i in range(0,lenY):
+
+            #left side of grid
+            if signs[i,0] <= 0: 
+                C_z[i,0] =  ( C[i,1] - C[i,0] ) / (dz)
+            else:
+                C_z[i,0] =  ( C[i,0] - C[i,lenX-1] ) / (dz)
+
+            #right side of grid
+            if signs[i,lenX-1] <= 0: 
+                C_z[i,lenX-1] =  ( C[i,0] - C[i,lenX-1] ) / (dz)
+            else:
+                C_z[i,lenX-1] =  ( C[i,lenX-1] - C[i,lenX-2] ) / (dz)
+
+
+        #Standard Upwind 
+        for i in range(0,lenY):
+            for j in range(1,lenX-2):
+                if signs[i,j] <= 0:
+                    C_z[i,j] = ( C[i,j+1] - C[i,j] ) / (dz)
+                else:
+                    C_z[i,j] = ( C[i,j] - C[i,j-1] ) / (dz)
+
+        # Ends x-Direction calculation #
+
+    elif string=='y':
+
+        #For periodicity on ends w/ UPWIND
+        for i in range(0,lenX):
+
+            #bottom of grid
+            if signs[0,i] <= 0: 
+                C_z[0,i] =  ( C[1,i] - C[0,i] ) / (dz)
+            else:
+                C_z[0,i] =  ( C[0,i] - C[lenY-1,i] ) / (dz)
+
+            #top of grid
+            if signs[lenY-1,i] <= 0: 
+                C_z[lenY-1,i] =  ( C[0,i] - C[lenY-1,i] ) / (dz)
+            else:
+                C_z[lenY-1,i] =  ( C[lenY-1,i] - C[lenY-2,i] ) / (dz)
+
+        #Standard Upwind
+        for i in range(1,lenY-2):
+            for j in range(0,lenX):
+                if signs[i,j] <= 0:
+                    C_z[i,j] = ( C[i+1,j] - C[i,j] ) / (dz)
+                else:
+                    C_z[i,j] = ( C[i,j] - C[i-1,j] ) / (dz)
+
+
+        # Ends y-Direction calculation #
+
+    else:
+
+        print('\n\n\n ERROR IN def D FOR COMPUTING 1ST DERIVATIVE\n')
+        print('Need to specify which desired derivative, x or y.\n\n\n') 
+
+    
+    return C_z
+
+
+
+###########################################################################
+#
+# FUNCTION: Setting up advection-diffusion solver
+#
+###########################################################################
+
+#def please_Update_Adv_Diff_Concentration(C,dt,dx,dy,uX,uY,k):
     '''Setting up advection-diffusion solver
     
     Note: This function alters C internally!
@@ -515,16 +698,19 @@ def please_Update_Adv_Diff_Concentration(C,dt,dx,dy,uX,uY,k):
     Returns:
         C:'''
 
-    # Compute Necessary Derivatives 
-    Cx = D(C,dx,'x')
-    Cy = D(C,dy,'y')
-    Cxx = DD(C,dx,'x')
-    Cyy = DD(C,dy,'y')
-        
-    # Update Concentration 
-    # C = C + dt * ( k*(Cxx+Cyy) - uX.T*Cx - uY.T*Cy )
+  #  # Compute Necessary Derivatives for x-Advection 
+  #  Cx = D(C,dx,'x')
+  #  Cxx = DD(C,dx,'x')
+   
+  #  # Time-step #1 (give auxillary) 
+  #  C = C + dt * ( k*(Cxx) - uX*Cx )
 
-    C = C + dt * ( k*(Cxx+Cyy) - uX*Cx - uY*Cy )
+  #  # Compute Necessary Derivatives for y-Advection 
+  #  Cy = D(C,dy,'y')
+  #  Cyy = DD(C,dy,'y')
 
-    return C
+  #  # Time-step #2 (give next iterative for C) 
+  #  C = C + dt * ( k*(Cyy) - uY*Cy )
+
+  #  return C
 

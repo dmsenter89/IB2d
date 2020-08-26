@@ -34,8 +34,8 @@ function Channel_Channel()
 %
 % Grid Parameters (MAKE SURE MATCHES IN input2d !!!)
 %
-Nx =  128;        % # of Eulerian Grid Pts. in x-Direction (MUST BE EVEN!!!)
-Ny =  128;        % # of Eulerian Grid Pts. in y-Direction (MUST BE EVEN!!!)
+Nx =  512;        % # of Eulerian Grid Pts. in x-Direction (MUST BE EVEN!!!)
+Ny =  512;        % # of Eulerian Grid Pts. in y-Direction (MUST BE EVEN!!!)
 Lx = 1.0;        % Length of Eulerian Grid in x-Direction
 Ly = 1.0;        % Length of Eulerian Grid in y-Direction
 
@@ -53,6 +53,10 @@ struct_name = 'channel'; % Name for .vertex, .spring, etc files.
 % Call function to construct geometry
 [xLag,yLag] = give_Me_Channel_Immsersed_Boundary_Geometry(ds,L,w,Lx,Ly);
 [xLag_C,yLag_C] = give_Me_Cylinder_Immsersed_Boundary_Geometry(ds,r,x0,y0);
+
+% Translate down for rectangular domain
+yLag = yLag - 0.375;
+yLag_C = yLag_C - 0.375;
 
 % Plot Geometry to test
 plot(xLag(1:end/2),yLag(1:end/2),'r-'); hold on;
@@ -82,7 +86,7 @@ print_Lagrangian_Vertices(xLag,yLag,struct_name);
 
 
 % Prints .target file!
-k_Target = 1e7;
+k_Target = 1e5;
 print_Lagrangian_Target_Pts(xLag,k_Target,struct_name);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

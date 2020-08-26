@@ -7,19 +7,20 @@
 function adv_diff()
 
 L = 1;              % Size of computational grid
-N = 64;             % # of grid points
+N = 64;            % # of grid points
 dx = L/(N-1);dy=dx; % Grid Resolution
-k = 1e-3;           % Diffusive Coefficient
+k = 1e-6;           % Diffusive Coefficient
 
 dt = 1e-3;          % time-step
-Tfinal = 2.0;       % final time
+Tfinal = 40.0;      % final time
 tVec = 0:dt:Tfinal; % time-vector
 
 [uX,uY] = give_Velocity_Fields(N,L,dx); % Give background velocity fields
 plot_Vector_Field(L,uX,uY,dx);
 C = give_Initial_Concentration(N,L,dx); % Give initial concentration
 
-print_dump = 50;
+% SAVING DATA TO VTK %
+print_dump = 100;
 ctsave = 0;
 % CREATE VIZ_IB2D FOLDER and VISIT FILES
 mkdir('viz_IB2d');
@@ -33,8 +34,21 @@ fprintf('\nStarting the advection-diffusion time-stepping!\n');
 for i=1:length(tVec)
 
     % Update the advection-diffusion
-    C = please_Update_Adv_Diff_Concentration(C,dt,dx,dy,uX,uY,k);
+    
+    % Flux Limiter
+    C = please_Update_Adv_Diff_Concentration_Flux_Limiter(C,dt,dx,dy,uX,uY,k);
+    
+    % Split (temporally) + Upwind
+    %C = please_Update_Adv_Diff_Concentration_Split(C,dt,dx,dy,uX,uY,k);
+    
+    % Split (temporally) + Lax-Wendroff
+    %C = please_Update_Adv_Diff_Concentration_Split_Lax_Wendroff(C,dt,dx,dy,uX,uY,k);
 
+    % Un-Split (temporally) + Upwind
+    %C = please_Update_Adv_Diff_Concentration_Unsplit(C,dt,dx,dy,uX,uY,k);
+
+
+    
     % Save files info!
     ctsave = ctsave + 1;
     if mod(ctsave,print_dump) == 0
@@ -164,8 +178,8 @@ for i=1:length(xGrid)
     
         y = yGrid(j);
         
-        uX(j,i) = -( y - yC );
-        uY(j,i) = ( x - xC );
+        uX(j,i) = -( y - yC )/5;
+        uY(j,i) = ( x - xC )/5;
         
     end
 end

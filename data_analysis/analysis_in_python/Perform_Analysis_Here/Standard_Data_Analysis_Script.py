@@ -33,37 +33,35 @@ import matplotlib.pyplot as plt
 #           from your stored viz_IB2d information
 #
 #     Note:
-#           (1) This code analyzes viz_IB2d code for channel flow in
-#               /data_analysis/Example_For_Data_Analysis/Example_Flow_In_Channel/viz_IB2d
-#           (2) Produces a plot of cross-sectional mag. of velocity for
-#               different points along the channel at three times.
-#           (3) USER-DEFINED functions are functions that users should make to
-#               analyze their specific data sets
-#           (4) MUST make sure to 'addpath' to where DA_Blackbox is, i.e.,
-#               line 67
-#           (5) MUST make sure to set path to desired dataset, i.e., in line
-#               63,64
-#           (6) USUALLY EASIEST TO SIMPLY PUT viz_IB2d and hier_IB2d_data folders
-#               in this directory
 #
+#           (1) USER-DEFINED functions are functions that users should make to
+#               analyze their specific data sets
+#           (2) MUST make sure to 'addpath' to where DA_Blackbox is, i.e.,
+#               line 67
+#           (3) MUST make sure to set path to desired dataset, i.e., in line
+#               63,64
+#           (4) USUALLY EASIEST TO SIMPLY PUT viz_IB2d and hier_IB2d_data folders
+#               in this directory
+#           (5) MUST have VTK library installed, if using Python3 with Anaconda, 
+#               please type <conda install -c menpo vtk> into your terminal
 #
 ################################################################################
 
-def Example_Channel_Flow_Analysis():
+def Standard_Data_Analysis_Script():
     
     # TEMPORAL INFO FROM input2d #
-    dt = 1e-4;      # Time-step
-    Tfinal = 0.015; # Final time in simulation
-    pDump=50;       # Note: 'print_dump' should match from input2d
+    dt = 1e-4      # Time-step
+    Tfinal = 0.015 # Final time in simulation
+    pDump=50       # Note: 'print_dump' should match from input2d
     
     # DATA ANALYSIS INFO #
-    start=1;                                            # 1ST interval # included in data analysis
-    finish=3;                                           # LAST interval # included in data analysis
-    dump_Times = np.array(range(start,finish+1))*pDump; # Time vector when data was printed in analysis
+    start=1                                            # 1ST interval # included in data analysis
+    finish=3                                           # LAST interval # included in data analysis
+    dump_Times = np.array(range(start,finish+1))*pDump # Time vector when data was printed in analysis
     
     # SET PATH TO DESIRED viz_IB2d DATA %
-    pathViz = 'viz_IB2d/';
-    pathForce = 'hier_IB2d_data';
+    pathViz = 'viz_IB2d/'
+    pathForce = 'hier_IB2d_data'
     
     # SET PATH TO DA_BLACKBOX %
     sys.path.append('../DA_Blackbox/')
@@ -76,17 +74,17 @@ def Example_Channel_Flow_Analysis():
         
         # Points to desired data viz_IB2d data file
         if i<10:
-            numSim = '000'+str(i);
+            numSim = '000'+str(i)
         elif i<100:
-            numSim = '00'+str(i);
+            numSim = '00'+str(i)
         elif i<1000:
-            numSim = '0'+str(i);
+            numSim = '0'+str(i)
         else:
-            numSim = str(i);
+            numSim = str(i)
     
     
         # Imports immersed boundary positions %
-        xLag,yLag = give_Lag_Positions(pathViz,numSim);
+        xLag,yLag = give_Lag_Positions(pathViz,numSim)
         
         # Imports (x,y) grid values and ALL Eulerian Data %
         #                      DEFINITIONS
@@ -99,7 +97,21 @@ def Example_Channel_Flow_Analysis():
         #
         #  Note: U(j,i): j-corresponds to y-index, i to the x-index
         #
-        x,y,Omega,P,uMag,uX,uY,U,V,Fx,Fy = import_Eulerian_Data(pathViz,numSim);
+        # 
+        # <<- CHOOSE WHAT EULERIAN DATA YOU WANT TO ANALYZE ->>
+        #
+        Eulerian_Flags = np.zeros(8) # Initialize Eulerian_Flags
+        Eulerian_Flags[0] = 0   # OMEGA
+        Eulerian_Flags[1] = 0   # PRESSURE
+        Eulerian_Flags[2] = 0   # uMAG
+        Eulerian_Flags[3] = 0   # uX [mag. x-component of velocity]
+        Eulerian_Flags[4] = 0   # uY [mag. x-component of velocity]
+        Eulerian_Flags[5] = 0   # uVEC [vector components of velocity: U,V]
+        Eulerian_Flags[6] = 0   # Fx [x-component of force ]
+        Eulerian_Flags[7] = 0   # Fy [y-component of force]
+        #
+        #
+        x,y,Omega,P,uMag,uX,uY,U,V,Fx,Fy = import_Eulerian_Data(pathViz,numSim,Eulerian_Flags)
 
 
         # Imports Lagrangian Pt. FORCE (magnitude) DATA %
@@ -111,7 +123,7 @@ def Example_Channel_Flow_Analysis():
         #   fLagNorm: magnitude of NORMAL force at boundary
         #   fLagTan: magnitude of TANGENT force at boundary
         #
-    fX_Lag,fY_Lag,fLagMag,fLagNorm,fLagTan = import_Lagrangian_Force_Data(pathForce,numSim);
+    fX_Lag,fY_Lag,fLagMag,fLagNorm,fLagTan = import_Lagrangian_Force_Data(pathForce,numSim)
 
     
 if __name__ == "__main__":

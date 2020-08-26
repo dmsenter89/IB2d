@@ -43,6 +43,8 @@ import matplotlib.pyplot as plt
 #               line 61
 #           (5) MUST make sure to set path to desired dataset, i.e., in line
 #               56
+#           (6) MUST have VTK library installed, if using Python3 with Anaconda, 
+#               please type <conda install -c menpo vtk> into your terminal
 #          
 #
 ################################################################################
@@ -50,18 +52,18 @@ import matplotlib.pyplot as plt
 def Example_Channel_Flow_Analysis():
     
     # TEMPORAL INFO FROM input2d #
-    dt = 1e-4;      # Time-step
-    Tfinal = 0.015; # Final time in simulation
-    pDump=50;       # Note: 'print_dump' should match from input2d
+    dt = 1e-4      # Time-step
+    Tfinal = 0.015 # Final time in simulation
+    pDump=50       # Note: 'print_dump' should match from input2d
 
     # DATA ANALYSIS INFO #
-    start=1;                                            # 1ST interval # included in data analysis
-    finish=3;                                           # LAST interval # included in data analysis
-    dump_Times = np.array(range(start,finish+1))*pDump; # Time vector when data was printed in analysis
+    start=1                                            # 1ST interval # included in data analysis
+    finish=3                                           # LAST interval # included in data analysis
+    dump_Times = np.array(range(start,finish+1))*pDump # Time vector when data was printed in analysis
         
     # SET PATH TO DESIRED viz_IB2d DATA %
-    pathViz = '/Users/nick_battista/Desktop/IB2d/data_analysis/analysis_in_matlab/Example_For_Data_Analysis/Example_Flow_In_Channel/viz_IB2d/';
-    pathForce = '/Users/nick_battista/Desktop/IB2d/data_analysis/analysis_in_matlab/Example_For_Data_Analysis/Example_Flow_In_Channel/hier_IB2d_data';
+    pathViz = '../../analysis_in_matlab/Example_For_Data_Analysis/Example_Flow_In_Channel/viz_IB2d/'
+    pathForce = '../../analysis_in_matlab/Example_For_Data_Analysis/Example_Flow_In_Channel/hier_IB2d_data/'
 
     # SET PATH TO DA_BLACKBOX %
     sys.path.append('../DA_Blackbox/')
@@ -74,17 +76,17 @@ def Example_Channel_Flow_Analysis():
 
         # Points to desired data viz_IB2d data file
         if i<10:
-            numSim = '000'+str(i);
+            numSim = '000'+str(i)
         elif i<100:
-            numSim = '00'+str(i);
+            numSim = '00'+str(i)
         elif i<1000:
-            numSim = '0'+str(i);
+            numSim = '0'+str(i)
         else:
-            numSim = str(i);
+            numSim = str(i)
         
     
         # Imports immersed boundary positions %
-        xLag,yLag = give_Lag_Positions(pathViz,numSim);
+        xLag,yLag = give_Lag_Positions(pathViz,numSim)
 
         # Imports (x,y) grid values and ALL Eulerian Data %
         #                      DEFINITIONS
@@ -97,7 +99,21 @@ def Example_Channel_Flow_Analysis():
         #
         #  Note: U(j,i): j-corresponds to y-index, i to the x-index
         #
-        x,y,Omega,P,uMag,uX,uY,U,V,Fx,Fy = import_Eulerian_Data(pathViz,numSim);
+        # 
+        # <<- CHOOSE WHAT EULERIAN DATA YOU WANT TO ANALYZE ->>
+        #
+        Eulerian_Flags = np.zeros(8) # Initialize Eulerian_Flags
+        Eulerian_Flags[0] = 0   # OMEGA
+        Eulerian_Flags[1] = 0   # PRESSURE
+        Eulerian_Flags[2] = 1   # uMAG
+        Eulerian_Flags[3] = 0   # uX [mag. x-component of velocity]
+        Eulerian_Flags[4] = 0   # uY [mag. x-component of velocity]
+        Eulerian_Flags[5] = 0   # uVEC [vector components of velocity: U,V]
+        Eulerian_Flags[6] = 0   # Fx [x-component of force ]
+        Eulerian_Flags[7] = 0   # Fy [y-component of force]
+        #
+        #
+        x,y,Omega,P,uMag,uX,uY,U,V,Fx,Fy = import_Eulerian_Data(pathViz,numSim,Eulerian_Flags)
 
 
         # Imports Lagrangian Pt. FORCE (magnitude) DATA %
@@ -109,24 +125,24 @@ def Example_Channel_Flow_Analysis():
         #   fLagNorm: magnitude of NORMAL force at boundary
         #   fLagTan: magnitude of TANGENT force at boundary
         #
-        fX_Lag,fY_Lag,fLagMag,fLagNorm,fLagTan = import_Lagrangian_Force_Data(pathForce,numSim);
+        fX_Lag,fY_Lag,fLagMag,fLagNorm,fLagTan = import_Lagrangian_Force_Data(pathForce,numSim)
 
 
         #                                                                    #
         # *** USER DEFINED FUNCTIONS TO GET DESIRED ANALYSIS PT. INDICES *** #
         #                                                                    #
-        if i==start:
-            xPts = np.array([0.125,0.225,0.325,0.425]);
-            yPts = np.array([0.405,0.595]);
-            xInds,yInds = give_Desired_Analysis_Points(x,y,xPts,yPts);
-            vel_data = np.zeros( (finish,len(yInds),len(xInds)) );
+        if i == start:
+            xPts = np.array([0.125,0.225,0.325,0.425])
+            yPts = np.array([0.405,0.595])
+            xInds,yInds = give_Desired_Analysis_Points(x,y,xPts,yPts)
+            vel_data = np.zeros( (finish,len(yInds),len(xInds)) )
 
         #                                                                    #
         # ***** USER DEFINED FUNCTION TO SAVE DESIRED VELOCITY DATA *****    #
         #                                                                    #
-        vel_data = store_Desired_Magnitude_Velocity_Data(uMag,vel_data,xInds,yInds,i);
+        vel_data = store_Desired_Magnitude_Velocity_Data(uMag,vel_data,xInds,yInds,i)
 
-    yVals = y[yInds];
+    yVals = y[yInds]
     plot_Desired_Data(yVals,vel_data)
 
 #################################################################################
@@ -143,24 +159,24 @@ def Example_Channel_Flow_Analysis():
 def give_Desired_Analysis_Points(x,y,xPts,yPts):
 
     # Get x-Indices
-    xInds = np.zeros(len(xPts));
+    xInds = np.zeros(len(xPts))
     for i in range(0,len(xPts)):
-        xPt = xPts[i];   # Get x-Pts
-        k = 0;           # Initialize loop iteration variable
+        xPt = xPts[i]   # Get x-Pts
+        k = 0           # Initialize loop iteration variable
         while x[k] < xPt:
-            xInds[i] = k;
-            k = k+1;
+            xInds[i] = k
+            k = k+1
 
     # Get y-Indices
-    yIndsAux = np.zeros(len(yPts));
+    yIndsAux = np.zeros(len(yPts))
     for i in range(0,len(yPts)):
-        yPt = yPts[i];   # Get x-Pts
-        k = 0;           # Initialize loop iteration variable
+        yPt = yPts[i]   # Get x-Pts
+        k = 0           # Initialize loop iteration variable
         while y[k] < yPt:
-            yIndsAux[i] = k;
-            k = k+1;
+            yIndsAux[i] = k
+            k = k+1
 
-    yInds = np.array(range(int(yIndsAux[0]),int(yIndsAux[1])));
+    yInds = np.array(range(int(yIndsAux[0]),int(yIndsAux[1])))
 
     return xInds, yInds
 
@@ -183,7 +199,7 @@ def store_Desired_Magnitude_Velocity_Data(uMag,vel_data,xInds,yInds,i):
 
     for j in range(0,len(xInds)):
         for k in range(0,len(yInds)):
-            vel_data[i-1,k,j] = uMag[yInds[k],xInds[j]];
+            vel_data[i-1,k,j] = uMag[int(yInds[k]),int(xInds[j])]
 
     return vel_data
 
@@ -200,57 +216,55 @@ def store_Desired_Magnitude_Velocity_Data(uMag,vel_data,xInds,yInds,i):
 def plot_Desired_Data(yVals,vel_data):
 
     # Set Figure Size
-    FigHand = plt.figure(1);
-    #set(FigHand,'Position',[100,100,1024,895]);
+    FigHand = plt.figure(1)
+    #set(FigHand,'Position',[100,100,1024,895])
     #
     # Make Figure!
     #
     plt.subplot(3,1,1)
-    mat = vel_data[0,:,:];
-    maxVal = mat.max();
-    plt.plot(yVals,vel_data[0,:,0],'*-');  plt.hold(True)
-    plt.plot(yVals,vel_data[0,:,1],'r*-'); plt.hold(True)
-    plt.plot(yVals,vel_data[0,:,2],'g*-'); plt.hold(True)
-    plt.plot(yVals,vel_data[0,:,3],'k*-'); plt.hold(True)
-    plt.axis([0.4,0.6,0,1.1*maxVal]);
-    #leg=plt.legend('x=0.125','x=0.175','x=0.225','x=0.275');
-    plt.title('t=0.005');
-    plt.ylabel('Mag. Velocity');
-    plt.xlabel('y');
+    mat = vel_data[0,:,:]
+    maxVal = mat.max()
+    plt.plot(yVals,vel_data[0,:,0],'*-')
+    plt.plot(yVals,vel_data[0,:,1],'r*-')
+    plt.plot(yVals,vel_data[0,:,2],'g*-')
+    plt.plot(yVals,vel_data[0,:,3],'k*-')
+    plt.axis([0.4,0.6,0,1.1*maxVal])
+    #leg=plt.legend('x=0.125','x=0.175','x=0.225','x=0.275')
+    plt.title('t=0.005')
+    plt.ylabel('Mag. Velocity')
+    plt.xlabel('y')
     #
     #
     plt.subplot(3,1,2)
-    mat = vel_data[1,:,:];
-    maxVal = mat.max();
-    plt.plot(yVals,vel_data[1,:,0],'*-');  plt.hold(True)
-    plt.plot(yVals,vel_data[1,:,1],'r*-'); plt.hold(True)
-    plt.plot(yVals,vel_data[1,:,2],'g*-'); plt.hold(True)
-    plt.plot(yVals,vel_data[1,:,3],'k*-'); plt.hold(True)
-    plt.axis([0.4,0.6,0,1.1*maxVal]);
-    #leg=plt.legend('x=0.125','x=0.175','x=0.225','x=0.275');
-    plt.title('t=0.01');
-    plt.ylabel('Mag. Velocity');
-    plt.xlabel('y');
+    mat = vel_data[1,:,:]
+    maxVal = mat.max()
+    plt.plot(yVals,vel_data[1,:,0],'*-')
+    plt.plot(yVals,vel_data[1,:,1],'r*-')
+    plt.plot(yVals,vel_data[1,:,2],'g*-')
+    plt.plot(yVals,vel_data[1,:,3],'k*-')
+    plt.axis([0.4,0.6,0,1.1*maxVal])
+    #leg=plt.legend('x=0.125','x=0.175','x=0.225','x=0.275')
+    plt.title('t=0.01')
+    plt.ylabel('Mag. Velocity')
+    plt.xlabel('y')
     #
     #
     plt.subplot(3,1,3)
-    mat = vel_data[2,:,:];
-    maxVal = mat.max();
-    plt.plot(yVals,vel_data[2,:,0],'*-');  plt.hold(True)
-    plt.plot(yVals,vel_data[2,:,1],'r*-'); plt.hold(True)
-    plt.plot(yVals,vel_data[2,:,2],'g*-'); plt.hold(True)
-    plt.plot(yVals,vel_data[2,:,3],'k*-'); plt.hold(True)
-    plt.axis([0.4,0.6,0,1.1*maxVal]);
-    #leg=plt.legend('x=0.125','x=0.175','x=0.225','x=0.275');
-    plt.title('t=0.015');
-    plt.ylabel('Mag. Velocity');
-    plt.xlabel('y');
+    mat = vel_data[2,:,:]
+    maxVal = mat.max()
+    plt.plot(yVals,vel_data[2,:,0],'*-')
+    plt.plot(yVals,vel_data[2,:,1],'r*-')
+    plt.plot(yVals,vel_data[2,:,2],'g*-')
+    plt.plot(yVals,vel_data[2,:,3],'k*-')
+    plt.axis([0.4,0.6,0,1.1*maxVal])
+    #leg=plt.legend('x=0.125','x=0.175','x=0.225','x=0.275')
+    plt.title('t=0.015')
+    plt.ylabel('Mag. Velocity')
+    plt.xlabel('y')
 
-
-    plt.hold(False)
+    plt.tight_layout()
     plt.box(on=True)
-    plt.draw()
-    plt.pause(0.0001)
+    plt.show()
 
 
 #################################################################################

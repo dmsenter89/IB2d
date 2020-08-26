@@ -5,9 +5,9 @@
 	Peskin's Immersed Boundary Method Paper in Acta Numerica, 2002.
 
  Author: Nicholas A. Battista
- Email:  nick.battista@unc.edu
+ Email:  nickabattista@gmail.com
  Date Created: May 27th, 2015
- Initial Python 3.5 port by: Christopher Strickland
+ Initial Python 3.5 port and VTK writes by Christopher Strickland
  Institution: UNC-CH
 
  This code is capable of creating Lagrangian Structures using:
@@ -25,12 +25,10 @@
  There are a number of built in Examples, mostly used for teaching purposes. 
  
  If you would like us to add a specific muscle model, 
- please let Nick (nick.battista@unc.edu) know.
+ please let Nick (nickabattista@gmail.com) know.
 
 ----------------------------------------------------------------------------'''
-import pdb
 import numpy as np
-import pandas as pd
 from math import sqrt
 import os
 from Supp import *
@@ -40,15 +38,33 @@ from please_Update_Fluid_Velocity import please_Update_Fluid_Velocity
 from please_Compute_Porous_Slip_Velocity import\
     please_Compute_Porous_Slip_Velocity
 from please_Plot_Results import please_Plot_Results
-from please_Compute_Normal_Tangential_Forces_On_Lag_Pts import\
+from please_Compute_Normal_Tangential_Forces_On_Lag_Pts import \
     please_Compute_Normal_Tangential_Forces_On_Lag_Pts
+
+
+# IF BOUSSINESQ
+try:
+    from please_Form_Boussinesq_Forcing_Terms import *
+except ImportError:
+    pass
 
 #Here is the try import C part
 try:
     import write
     C_flag = True
+    print('Running with compiled C I/O library.')
 except:
     C_flag = False
+
+#Switch for vtk library writes (this will be overridden by C_flag)
+try:
+    import vtk
+    from vtk.util import numpy_support
+    vtk_lib_flag = True
+except:
+    vtk_lib_flag = False
+    if not C_flag:
+        print('Running without optimized IO libraries (VTK or C).')
 
 ###############################################################################
 #
@@ -57,7 +73,7 @@ except:
 #
 ###############################################################################
 
-def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
+def main(Fluid_Params,Grid_Params,Time_Params,Lag_Struct_Params,Output_Params,Lag_Name_Params):
 
     ''' 2D IMMERSED BOUNDARY SOLVER ON RECTANGULAR DOMAIN w/ PERIODIC BOUNDARIES
 
@@ -90,109 +106,193 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
     F_x = int{ fx(s,t) delta(x - LagPts(s,t)) ds }
     F_y = int{ fy(s,t) delta(x - LagPts(s,t)) ds }'''
 
+    print('\n________________________________________________________________________________\n\n')
+    print('\n---------------->>                 IB2d                      <<----------------\n')
+    print('\n________________________________________________________________________________\n\n')
+    print('If using the code for research purposes please cite the following two papers: \n')
+    print('     [1] N.A. Battista, A.J. Baird, L.A. Miller, A mathematical model and MATLAB code for muscle-fluid-structure simulations, Integ. Comp. Biol. 55(5):901-11 (2015)\n')
+    print('     [2] N.A. Battista, W.C. Strickland, L.A. Miller, IB2d a Python and MATLAB implementation of the immersed boundary method, Bioinspir. Biomim. 12(3):036003 (2017)\n')
+    print('     [3] N.A. Battista, W.C. Strickland, A. Barrett, L.A. Miller, IB2d Reloaded: A more powerful Python and MATLAB implementation of the immersed boundary method. Math Meth Appl Sci. 1?26 (2017).')
+    print('\n________________________________________________________________________________')
+    print('\n\nNOTE: If running pyIB2d with Anaconda, please note that it will run faster with vtk installed.\n')
+    print('          To install, type the following line into your terminal: <conda install -c menpo vtk> in your terminal')
+    print('\n________________________________________________________________________________')
+    print('\n\n\n |****** Prepping Immersed Boundary Simulation ******|\n')
+    print('\n\n--> Reading input data for simulation...\n\n')
     
-    # Temporal Information
-    NTime = np.floor(T_FINAL/dt)+1 # number of total time-steps,
-                                # (floored, so exact number of time-steps)
-    dt = T_FINAL/NTime #time-step (slightly perturbed dt, so exact number of 
-                       #time-steps are used
-    current_time = 0.0
-    
+    #
+    # ** IBM_DRIVER INPUT DEFINITIONS ** :
+    #
+    #               Fluid_Params[1]: mu
+    #                           [2]: density
+    #
+    #               Grid_Params[1]: Nx
+    #                          [2]: Ny
+    #                          [3]: Lx
+    #                          [4]: Ly
+    #                          [5]: Supp
+    #
+    #               Time_Params[1]: Tfinal [end time of simulation]
+    #                          [2]: dt [time-step]
+    #
+    #               Lag_Struct_Params[1]: springs
+    #                                [2]: update_springs
+    #                                [3]: target points
+    #                                [4]: update_target_points
+    #                                [5]: beams [torsional beams]
+    #                                [6]: update_beams
+    #                                 .         .
+    #                                 .         .
+    #                                 .         .
+    #
+    #               Output_Params[0]: print_dump
+    #                            [1]: plot_Matlab
+    #                            [2]: plot_LagPts
+    #                            [3]: plot_Velocity
+    #                            [4]: plot_Vorticity
+    #                            [5]: plot_MagVelocity
+    #                            [6]: plot_Pressure
+    #                            [7]:  save_Vorticity 
+    #                            [8]:  save_Pressure 
+    #                            [9]: save_uVec 
+    #                            [10]: save_uMag 
+    #                            [11]: save_uX 
+    #                            [12]: save_uY 
+    #                            [13]: save_fMag 
+    #                            [14]: save_fX 
+    #                            [15]: save_fY 
+    #                            [16]: save_hier 
+
+
+    # SIMULATION NAME STRING TO RUN .vertex, .spring, etc. #
+    struct_name = Lag_Name_Params
+
+    # FLUID PARAMETER VALUES STORED #
+    mu = Fluid_Params[0]      # Dynamic Viscosity
+    rho = Fluid_Params[1]     # Density
+
+    # TEMPORAL INFORMATION VALUES STORED #
+    T_FINAL = Time_Params[0]     # Final simulation time
+    dt = Time_Params[1]          # Time-step
+    #NTime = floor[T_FINAL/dt]+1 # # of total time-steps [floor'd so exact number of time-steps]
+    #dt = T_FINAL/NTime          # revised time-step [slightly perturbed dt, so exact # of time-steps are used]
+    current_time = 0.0           # initialize start of simulation to time, 0 
+
+
     # GRID INFO #
-    Nx = grid_Info['Nx']   # num of Eulerian pts. in x-direction (int)
-    Ny = grid_Info['Ny']   # num of Eulerian pts. in y-direction (int)
-    Lx = grid_Info['Lx']   # Length of Eulerian grid in x-coordinate
-    Ly = grid_Info['Ly']   # Length of Eulerian grid in y-coordinate
-    dx = grid_Info['dx']   # Spatial-size in x
-    dy = grid_Info['dy']   # Spatial-size in y
-    supp = grid_Info['supp'] # Delta-function support
-    
+    Nx =   int(Grid_Params[0])               # # of Eulerian pts. in x-direction
+    Ny =   int(Grid_Params[1])                # # of Eulerian pts. in y-direction
+    Lx =   Grid_Params[2]                # Length of Eulerian grid in x-coordinate
+    Ly =   Grid_Params[3]                # Length of Eulerian grid in y-coordinate
+    dx =   Grid_Params[2]/Grid_Params[0] # Spatial-size in x
+    dy =   Grid_Params[3]/Grid_Params[1] # Spatial-size in y
+    supp = Grid_Params[4]                # Delta-function support
+    grid_Info = [Nx,Ny,Lx,Ly,dx,dy,supp] # Store for passing values into IB time-loop sub-functions
+                                         # NOTE: grid_Info[8] = Nb, grid_Info[9] = ds [THEY GET STORED LATER]
+
     # PRINTING/PLOTTING INFO #
-    pDump = grid_Info['pDump']              # Print (Plot) Dump interval
-    pMatplotlib = grid_Info['pMatplotlib']  # Plot in matplotlib? (1=YES,0=NO)
-    lagPlot = grid_Info['lagPlot']     # Plot LAGRANGIAN PTs ONLY in matplotlib
-    velPlot = grid_Info['velPlot']     # Plot LAGRANGIAN PTs + VELOCITY FIELD in matplotlib
-    vortPlot = grid_Info['vortPlot']   # Plot LAGRANGIAN PTs + VORTICITY colormap in matplotlib
-    uMagPlot = grid_Info['uMagPlot']   # Plot LAGRANGIAN PTs + MAGNITUDE OF VELOCITY
-                                       #   colormap in matplotlib
-    pressPlot = grid_Info['pressPlot'] # Plot LAGRANTIAN PTs + PRESSURE colormap in matplotlib
-    
-    
+    pDump = Output_Params[0]          # Print [Plot] Dump interval
+    pMatplotlib = Output_Params[1]    # Plot in Matlab? [1=YES,0=NO]
+    lagPlot = Output_Params[2]        # Plot LAGRANGIAN PTs ONLY in Matlab
+    velPlot = Output_Params[3]        # Plot LAGRANGIAN PTs + VELOCITY FIELD in Matlab
+    vortPlot = Output_Params[4]       # Plot LAGRANGIAN PTs + VORTICITY colormap in Matlab
+    uMagPlot = Output_Params[5]       # Plot LAGRANGIAN PTs + MAGNITUDE OF VELOCITY colormap in Matlab
+    pressPlot = Output_Params[6]      # Plot LAGRANGIAN PTs + PRESSURE colormap in Matlab
+
+
     # MODEL STRUCTURE DATA STORED #
-    springs_Yes = model_Info['springs']                    # Springs: 0 (0=no, 1=yes)
-    update_Springs_Flag = model_Info['update_springs']     # Update_Springs: (0=no, 1=yes)
-    target_pts_Yes = model_Info['target_pts']              # Target_Pts: (0=no, 1=yes)
-    update_Target_Pts = model_Info['update_target_pts']    # Update_Target_Pts: (0=no, 1=yes)
-    beams_Yes = model_Info['beams']                        # Beams: (0=no, 1=yes)
-    update_Beams_Flag = model_Info['update_beams']         # Update_Beams: (0=no, 1=yes)
-    muscles_Yes = model_Info['muscles']                    # FV-LT Muscles: (0=no, 1=yes)
-    hill_3_muscles_Yes = model_Info['hill_3_muscles']      # Hill 3-Element Muscle: (0=no, 1=yes)
-    arb_ext_force_Yes = model_Info['arb_ext_force']        # Arbitrary External Force: (0=no, 1=yes)
-    tracers_Yes = model_Info['tracers']                    # Tracers: (0=no, 1=yes)
-    mass_Yes = model_Info['mass']                          # Mass Points: (0=no, 1=yes)
-    gravity_Yes = model_Info['gravity']                    # Gravity: (0=no, 1=yes)
-    #NOTE: model_Info['xG']/['yG'] - components of gravity vector
-    porous_Yes = model_Info['porous']                      # Porous Media: (0=no, 1=yes)
-    concentration_Yes = model_Info['concentration']        # Background Concentration Gradient: 
-                                                           #  0 (for no) or 1 (for yes)
-    d_Springs_Yes = model_Info['damped_springs']           #Damped Springs: 0 (for no) or 1 (for yes)
-    update_D_Springs_Flag = model_Info['update_D_Springs'] # Update_Damped_Springs (0=no, 1=yes)
+    springs_Yes = Lag_Struct_Params[0]           # Springs: 0 [for no] or 1 [for yes] 
+    update_Springs_Flag = Lag_Struct_Params[1]   # Update_Springs: 0 [for no] or 1 [for yes]
+    target_pts_Yes = Lag_Struct_Params[2]        # Target_Pts: 0 [for no] or 1 [for yes]
+    update_Target_Pts = Lag_Struct_Params[3]     # Update_Target_Pts: 0 [for no] or 1 [for yes]
+    beams_Yes = Lag_Struct_Params[4]             # Beams: 0 [for no] or 1 [for yes]
+    update_Beams_Flag = Lag_Struct_Params[5]     # Update_Beams: 0 [for no] or 1 [for yes]
+    nonInv_beams_Yes = Lag_Struct_Params[6]      # Beams [non-invariant]: 0 [for no] or 1 [for yes]
+    update_nonInv_Beams_Flag = Lag_Struct_Params[7] # Update_nonInv_Beams: 0 [for no] or 1 [for yes]
+    muscles_Yes = Lag_Struct_Params[8]           # FV-LT Muscles: 0 [for no] or 1 [for yes]
+    hill_3_muscles_Yes = Lag_Struct_Params[9]    # Hill 3-Element Muscle: 0 [for no] or 1 [for yes]
+    arb_ext_force_Yes = Lag_Struct_Params[10]     # Arbitrary External Force: 0 [for no] or 1 [for yes]
+    tracers_Yes = Lag_Struct_Params[11]          # Tracers: 0 [for no] or 1 [for yes]
+    mass_Yes = Lag_Struct_Params[12]             # Mass Points: 0 [for no] or 1 [for yes]
+    gravity_Yes = Lag_Struct_Params[13]          # Gravity: 0 [for no] or 1 [for yes]
+    # NOTE: Lag_Struct_Params[14],[15]:            <- components of gravity vector [if gravity, initialize them below]
+    porous_Yes = Lag_Struct_Params[16]           # Porous Media: 0 [for no] or 1 [for yes]
+    concentration_Yes = Lag_Struct_Params[17]    # Background Concentration Gradient: 0 [for no] or 1 [for yes]
+    electro_phys_Yes = Lag_Struct_Params[18]     # Electrophysiology [FitzHugh-Nagumo]: 0 [for no] or 1 [for yes]
+    d_Springs_Yes = Lag_Struct_Params[19]        # Damped Springs: 0 [for no] or 1 [for yes]
+    update_D_Springs_Flag = Lag_Struct_Params[20]# Update_Damped_Springs: # 0 [for no] or 1 [for yes]
+    boussinesq_Yes = Lag_Struct_Params[21]       # Boussinesq Approx.: 0 [for no] or 1 [for yes]
+    exp_Coeff = Lag_Struct_Params[22]            # Expansion Coefficient [e.g., thermal, etc] for Boussinesq approx.
+    general_force_Yes = Lag_Struct_Params[23]    # General User-Defined Force Term: 0 [for no] or 1 [for yes]
+    poroelastic_Yes = Lag_Struct_Params[24]      # Poroelastic media 0 [for no] or 1 [for yes]
+    brinkman_Yes = Lag_Struct_Params[25]         # Brinkman term in Momentum equation 0 [for no] or 1 [for yes]
+
+    print(Lag_Struct_Params)
+
+    # CLEAR INPUT DATA #
+
+
+    # Temporal Information
+    #NTime = np.floor(T_FINAL/dt)+1 # number of total time-steps,
+                                # (floored, so exact number of time-steps)
+    #dt = T_FINAL/NTime #time-step (slightly perturbed dt, so exact number of 
+                       #time-steps are used
+    #current_time = 0.0
     
+
+
     
-    
-    
-    #Lagrangian Structure Data
-    ds = Lx/(2.*Nx)             #Lagrangian Spacing
-    grid_Info['ds'] = ds
+
     
     
     # Create EULERIAN Mesh (these assume periodicity in x and y)
     x = np.arange(0,Lx,dx)
     y = np.arange(0,Ly,dy)
     # Create x-Mesh
-    X = np.empty((Nx,x.size))
-    for ii in range(Nx):
-        X[ii,] = x
+    #X = np.empty((Nx,x.size))
+    #for ii in range(Nx):
+    #    X[ii,] = x
     # Create y-Mesh
-    Y = np.empty((y.size,Ny))
-    for ii in range(Ny):
-        Y[:,ii] = y
-        
+    #Y = np.empty((y.size,Ny))
+    #for ii in range(Ny):
+    #    Y[:,ii] = y
+    # MATLAB SYNTAX: [X,Y] = meshgrid(0:dx:Lx-dx,0:dy:Ly-dy)
+    X,Y = np.meshgrid(x,y)
+    # MATLAB SYNTAX: [idX,idY] = meshgrid(0:Nx-1,0:Ny-1)  <--- INITIALIZE FOR FLUID SOLVER FFT FUNCTION    
+    idX,idY = np.meshgrid(np.arange(0,Nx,1),np.arange(0,Ny,1)) # <- INITIALIZES FOR FLUID SOLVER FFT OPERATORS
+
     # # # # # HOPEFULLY WHERE I CAN READ IN INFO!!! # # # # #
+
 
     # READ IN LAGRANGIAN POINTS #
     Nb,xLag,yLag = read_Vertex_Points(struct_name)
-    grid_Info['Nb'] = Nb          # num Total Number of Lagrangian Pts.
+    grid_Info.append(Nb)       # Total Number of Lagrangian Pts. (grid_Info[7]=Nb)
     xLag_P = xLag              # Initialize previous Lagrangian x-Values 
                                #   (for use in muscle-model)
     yLag_P = yLag              # Initialize previous Lagrangian y-Values 
                                #   (for use in muscle-model)
+
+    #Lagrangian Structure Data
+    ds = Lx/(2.*Nx)             # Lagrangian Spacing
+    grid_Info.append(ds)        # grid_Info[8] = ds                  
+    
+    print('\n--> FIBER MODEL INCLUDES: \n')
+                   
                             
-                            
-    # READ IN TRACERS (IF THERE ARE TRACERS) #
-    if tracers_Yes:
-       nulvar,xT,yT = read_Tracer_Points(struct_name)
-       tracers = np.zeros((xT.size,4))
-       tracers[0,0] = 1
-       tracers[:,1] = xT
-       tracers[:,2] = yT
-            #tracers_info: col 1: xPt of Tracers
-            #              col 2: yPt of Tracers
-    else:
-       tracers = np.zeros((1,1))
+
        
        
-    # READ IN CONCENTRATION (IF THERE IS A BACKGROUND CONCENTRATION) #
-    if concentration_Yes:
-        C,kDiffusion = read_In_Concentration_Info(struct_name)
-            #C:           Initial background concentration
-            #kDiffusion:  Diffusion constant for Advection-Diffusion
-    else:
-        C = 0 # placeholder for plotting 
+
         
         
     # READ IN SPRINGS (IF THERE ARE SPRINGS) #
     if springs_Yes:
+        print('  - Springs and ...')
+        if update_Springs_Flag == 0:
+            print('                   NOT dynamically updating spring properties\n')
+        else:
+            print('                   dynamically updating spring properties\n')
+
         springs_info = read_Spring_Points(struct_name)
             #springs_info: col 1: starting spring pt (by lag. discretization)
             #              col 2: ending spring pt. (by lag. discretization)
@@ -204,8 +304,53 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
             # "please_Find_Lagrangian_Forces_On_Eulerian_grid function"
     
 
+
+    # READ IN BEAMS (IF THERE ARE TORSIONAL SPRINGS aka BEAMS) #
+    if beams_Yes:
+        print('  - Beams ("Torsional Springs") and ... ')
+        if update_Beams_Flag == 0:
+            print('                    NOT dynamically updating beam properties\n')
+        else:
+            print('                    dynamically updating beam properties\n')
+
+        beams_info = read_Beam_Points(struct_name)
+        #beams:      col 1: 1ST PT.
+        #            col 2: MIDDLE PT. (where force is exerted)
+        #            col 3: 3RD PT.
+        #            col 4: beam stiffness
+        #            col 5: curavture
+    else:
+        beams_info = 0
+
+
+
+    # READ IN NON-INVARIANT BEAMS (IF THERE ARE NON-INVARIANT BEAMS) #
+    if nonInv_beams_Yes:
+        print('  - Beams ("Non-Invariant Beams") and ... ')
+        if update_Beams_Flag == 0:
+            print('                    NOT dynamically updating beam properties\n')
+        else:
+            print('                    dynamically updating beam properties\n')
+
+        nonInv_beams_info = read_nonInv_Beam_Points(struct_name)
+        #beams:      col 1: 1ST PT.
+        #            col 2: MIDDLE PT. (where force is exerted)
+        #            col 3: 3RD PT.
+        #            col 4: beam stiffness
+        #            col 5: x-curavture
+        #            col 6: y-curvature
+    else:
+        nonInv_beams_info = 0    
+
+
     # READ IN DAMPED SPRINGS (IF THERE ARE DAMPED SPRINGS) #
     if d_Springs_Yes:
+        print('  - Damped Springs and ...')
+        if update_D_Springs_Flag == 0:
+            print('                   NOT dynamically updating damped spring properties\n')
+        else:
+            print('                   dynamically updating spring properties\n')
+
         d_springs_info = read_Damped_Spring_Points(struct_name) 
             #springs_info: col 1: starting spring pt (by lag. discretization)
             #              col 2: ending spring pt. (by lag. discretization)
@@ -217,69 +362,15 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
             # "please_Find_Lagrangian_Forces_On_Eulerian_grid function"
     
     
-    # READ IN MUSCLES (IF THERE ARE MUSCLES) #
-    if muscles_Yes:
-        muscles_info = read_Muscle_Points(struct_name)
-            #         muscles: col 1: MASTER NODE (by lag. discretization)
-            #         col 2: SLAVE NODE (by lag. discretization)
-            #         col 3: length for max. muscle tension
-            #         col 4: muscle constant
-            #         col 5: hill parameter, a
-            #         col 6: hill parameters, b
-            #         col 7: force maximum!
-    else:
-        muscles_info = np.zeros((1,1))  #just to pass placeholder into 
-            # "please_Find_Lagrangian_Forces_On_Eulerian_grid function"
-
-    
-    
-    
-    
-    
-    # READ IN MUSCLES (IF THERE ARE MUSCLES) #
-    if hill_3_muscles_Yes:
-        muscles3_info = read_Hill_3Muscle_Points(struct_name)
-            #         muscles: col 1: MASTER NODE (by lag. discretization)
-            #         col 2: SLAVE NODE (by lag. discretization)
-            #         col 3: length for max. muscle tension
-            #         col 4: muscle constant
-            #         col 5: hill parameter, a
-            #         col 6: hill parameters, b
-            #         col 7: force maximum!
-    else:
-        muscles3_info = np.zeros((1,1))  #just to pass placeholder into "please_Find_Lagrangian_Forces_On_Eulerian_grid function"
-    
-    
-    
-    
-    
-    # READ IN MASS POINTS (IF THERE ARE MASS PTS) #
-    if mass_Yes:
-        mass_aux = read_Mass_Points(struct_name)
-        #target_aux: col 0: Lag Pt. ID w/ Associated Mass Pt.
-        #            col 1: "Mass-spring" stiffness parameter
-        #            col 2: "MASS" value parameter
-        
-        # initialize mass_info
-        mass_info = np.empty((mass_aux.shape[0],5))
-        
-        mass_info[:,0] = mass_aux[:,0] #Stores Lag-Pt IDs in col vector
-        #Stores Original x-Lags and y-Lags as x/y-Mass Pt. Identities
-        mass_info[:,1] = xLag[mass_info[:,0].astype('int')]
-        mass_info[:,2] = yLag[mass_info[:,0].astype('int')]
-        
-        mass_info[:,3] = mass_aux[:,1]   #Stores "mass-spring" parameter 
-        mass_info[:,4] = mass_aux[:,2]   #Stores "MASS" value parameter
-        
-    else:
-        mass_info = np.zeros((1,1))
-
-
-
-
 
     # READ IN TARGET POINTS (IF THERE ARE TARGET PTS) #
     if target_pts_Yes:
+        print('  - Target Pts. and ...')
+        if update_Target_Pts == 0:
+            print('                 NOT dynamically updating target point properties\n')
+        else:
+            print('                 dynamically updating target point properties\n')
+        
         target_aux = read_Target_Points(struct_name)
         #target_aux: col 0: Lag Pt. ID w/ Associated Target Pt.
         #            col 1: target STIFFNESSES
@@ -297,9 +388,66 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
         target_info = np.zeros((1,1))
     
     
+
+    
+    
+    
+    # READ IN MASS POINTS (IF THERE ARE MASS PTS) #
+    if mass_Yes:
+        print('  - Mass Pts. with ')
+        if gravity_Yes == 0:
+            print('          NO artificial gravity\n')
+        else:
+            print('          artificial gravity\n')
+
+        mass_aux = read_Mass_Points(struct_name)
+        #target_aux: col 0: Lag Pt. ID w/ Associated Mass Pt.
+        #            col 1: "Mass-spring" stiffness parameter
+        #            col 2: "MASS" value parameter
+        
+        if ( mass_aux.size/3.0 < 2.0 ):  # checks if only 1 mass point
+
+            # initialize mass_info
+            mass_info = np.empty((1,5))
+        
+            mass_info[0,0] = mass_aux[0] #Stores Lag-Pt IDs in col vector
+            
+            #Stores Original x-Lags and y-Lags as x/y-Mass Pt. Identities
+            if ( np.isscalar(xLag) ):
+                mass_info[0,1] = xLag
+                mass_info[0,2] = yLag
+            else:
+                mass_info[0,1] = xLag[mass_info[0].astype('int')]
+                mass_info[0,2] = yLag[mass_info[0].astype('int')]
+
+            mass_info[0,3] = mass_aux[1]   #Stores "mass-spring" parameter 
+            mass_info[0,4] = mass_aux[2]   #Stores "MASS" value parameter
+        
+        else:
+            # initialize mass_info
+            mass_info = np.empty((mass_aux.shape[0],5))
+        
+            mass_info[:,0] = mass_aux[:,0] #Stores Lag-Pt IDs in col vector
+            #Stores Original x-Lags and y-Lags as x/y-Mass Pt. Identities
+            mass_info[:,1] = xLag[mass_info[:,0].astype('int')]
+            mass_info[:,2] = yLag[mass_info[:,0].astype('int')]
+        
+            mass_info[:,3] = mass_aux[:,1]   #Stores "mass-spring" parameter 
+            mass_info[:,4] = mass_aux[:,2]   #Stores "MASS" value parameter
+
+
+    else:
+        mass_info = np.zeros((1,1))
+
+
+
+
+
+
     
     # READ IN POROUS MEDIA INFO (IF THERE IS POROSITY) #
     if porous_Yes:
+        print('  - Porous Points\n')
         porous_aux = read_Porous_Points(struct_name)
         #porous_aux: col 1: Lag Pt. ID w/ Associated Porous Pt.
         #            col 2: Porosity coefficient
@@ -320,22 +468,71 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
 
 
 
-    # READ IN BEAMS (IF THERE ARE BEAMS) #
-    if beams_Yes:
-        beams_info = read_Beam_Points(struct_name)
-        #beams:      col 1: 1ST PT.
-        #            col 2: MIDDLE PT. (where force is exerted)
-        #            col 3: 3RD PT.
-        #            col 4: beam stiffness
-        #            col 5: curavture
+    # READ IN PORO-ELASTIC MEDIA INFO (IF THERE IS PORO-ELASTICITY) #
+    if ( poroelastic_Yes ):
+        print('  -Poroelastic media\n')
+        poroelastic_info = read_PoroElastic_Points(struct_name)
+        F_Poro = np.zeros( ( len(poroelastic_info), 2) )   # Initialization
+        #poroelastic_info: col 1: Lag Pt. ID w/ Associated Porous Pt.
+        #                  col 2: Porosity coefficient
     else:
-        beams_info = 0
-        
+        poroelastic_info = np.zeros((1,1))
+        F_Poro = np.zeros((1,1))
+
+  
+
+
+    # READ IN MUSCLES (IF THERE ARE MUSCLES) #
+    if muscles_Yes:
+        print('  - MUSCLE MODEL (Force-Velocity / Length-Tension Model)\n')
+        muscles_info = read_Muscle_Points(struct_name)
+            #         muscles: col 1: MASTER NODE (by lag. discretization)
+            #         col 2: SLAVE NODE (by lag. discretization)
+            #         col 3: length for max. muscle tension
+            #         col 4: muscle constant
+            #         col 5: hill parameter, a
+            #         col 6: hill parameters, b
+            #         col 7: force maximum!
+    else:
+        muscles_info = np.zeros((1,1))  #just to pass placeholder into 
+            # "please_Find_Lagrangian_Forces_On_Eulerian_grid function"
+
+
     
+    # READ IN MUSCLES (IF THERE ARE MUSCLES) #
+    if hill_3_muscles_Yes:
+        print('  - MUSCLE MODEL (3 Element Hill Model)\n')
+        muscles3_info = read_Hill_3Muscle_Points(struct_name)
+            #         muscles: col 1: MASTER NODE (by lag. discretization)
+            #         col 2: SLAVE NODE (by lag. discretization)
+            #         col 3: length for max. muscle tension
+            #         col 4: muscle constant
+            #         col 5: hill parameter, a
+            #         col 6: hill parameters, b
+            #         col 7: force maximum!
+    else:
+        muscles3_info = np.zeros((1,1))  #just to pass placeholder into "please_Find_Lagrangian_Forces_On_Eulerian_grid function"
+    
+    
+
+    # READ IN USER-DEFINED FORCE MODEL PARAMETERS (IF THERE IS A USER-DEFINED FORCE) #
+    if general_force_Yes:
+        print('  - GENERAL FORCE MODEL (user-defined force term)\n')
+        gen_force_info = read_General_Forcing_Function(struct_name)
+        #
+        #           
+        #   ALL PARAMETERS / FORCE FUNCTION SET BY USER!            
+        #            
+        #            
+    else:
+        gen_force_info = 0  
+
+        
+
     # CONSTRUCT GRAVITY INFORMATION (IF THERE IS GRAVITY) #
     if gravity_Yes:    
-        xG = model_Info['xG']       # x-Component of Gravity Vector
-        yG = model_Info['yG']       # y-Component of Gravity Vector
+        xG = Lag_Struct_Params[14]      # x-Component of Gravity Vector
+        yG = Lag_Struct_Params[15]      # y-Component of Gravity Vector
         normG = sqrt( xG**2 + yG**2 )
         gravity_Info = [gravity_Yes, xG/normG, yG/normG]
         #   col 1: flag if considering gravity
@@ -347,55 +544,148 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
     else:
         gravity_Info = np.zeros((1,1))
 
+
+    #
+    # BACKGROUND FLOW ITEMS
+    #
+    print('\n\n--> Background Flow Items\n')
+    if ( tracers_Yes == 0 ) and (concentration_Yes == 0):
+        print('      (No tracers nor other passive scalars immersed in fluid)\n\n')
+
+
+    # READ IN TRACERS (IF THERE ARE TRACERS) #
+    if tracers_Yes:
+        print('  -Tracer Particles included\n')
+        nulvar,xT,yT = read_Tracer_Points(struct_name)
+        tracers = np.zeros((xT.size,4))
+        tracers[0,0] = 1
+        tracers[:,1] = xT
+        tracers[:,2] = yT
+            #tracers_info: col 1: xPt of Tracers
+            #              col 2: yPt of Tracers
+    else:
+        tracers = np.zeros((1,1))
+
+
+
+    # READ IN CONCENTRATION (IF THERE IS A BACKGROUND CONCENTRATION) #
+    if concentration_Yes:
+        print('  -Background concentration included\n')
+        C,kDiffusion = read_In_Concentration_Info(struct_name)
+            #C:           Initial background concentration
+            #kDiffusion:  Diffusion constant for Advection-Diffusion
+    else:
+        C = 0 # placeholder for plotting 
+
+
+
+    # READ IN BRINKMAN TERM (IF THERE IS A BRINKMAN TERM) #
+    if brinkman_Yes:
+        print('  -Brinkman term included\n')
+        Brink,kBrink = read_In_Brinkman_Info(struct_name)
+            #Brink:   Initial brinkman permeability matrix
+            #kBrink:  Permeability for brinkman model
+    else:
+        Brink = 0 # placeholder for plotting 
+
+
+    # CONSTRUCT BOUSSINESQ INFORMATION (IF USING BOUSSINESQ) #
+    if boussinesq_Yes:
+        print('  -Boussinesq Approximation included\n')
+        print('     -> NEED: 1. gravity flag w/ gravity components \n')
+        print('              2. background concentration \n')
+
+        if exp_Coeff == 0:
+            print('     -> exp_Coeff set to 1.0 by default, was assigned 0 in input2d <-\n')
+            exp_Coeff = 1.0
+
+        #if gravity_Info == 0:
+        #    print('\n\n\n READ THE ERROR MESSAGE -> YOU MUST FLAG GRAVITY IN INPUT FILE FOR BOUSSINESQ! :) \n\n\n')
+        #    error('YOU MUST FLAG GRAVITY IN INPUT FILE FOR BOUSSINESQ! :)')
+        #elif concentration_Yes == 0:
+        #    print('\n\n\n READ THE ERROR MESSAGE -> YOU MUST HAVE BACKGROUND CONCENTRATION FOR BOUSSINESQ! :) \n\n\n')
+        #    error('YOU MUST FLAG CONCENTRATION IN INPUT FILE FOR BOUSSINESQ! :)')
+
+        # Forms Boussinesq forcing terms, e.g., (exp_Coeff)*gVector for Momentum Eq.
+        fBouss_X,fBouss_Y = please_Form_Boussinesq_Forcing_Terms(exp_Coeff,Nx,Ny,gravity_Info)
+
+        # Finds initial concentration Laplacian (may not be necessary)
+        #Cxx = DD(C,dx,'x')
+        #Cyy = DD(C,dy,'y')
+        #laplacian_C = Cxx+Cyy
+        #C_0 = np.zeros(C.shape) # Define background concentration
+
+
+
     
     # Initialize the initial velocities to zero.
     U = np.zeros((Ny,Nx))                           # x-Eulerian grid velocity
     V = np.zeros((Ny,Nx))                           # y-Eulerian grid velocity
+    U.shape
     mVelocity = np.zeros((mass_info.shape[0],2))  # mass-Pt velocity 
 
     if arb_ext_force_Yes:
+        print('  -Artificial External Forcing Onto Fluid Grid\n')
         firstExtForce = 1       # initialize external forcing
         indsExtForce = 0        # initialize for external forcing computation
     
     # ACTUAL TIME-STEPPING IBM SCHEME! 
     #(flags for storing structure connects for printing and printing to .vtk)
-    cter = 0; ctsave = 0; firstPrint = 1; loc = 1; diffy = 1
+    cter = 0 
+    ctsave = 0 
+    firstPrint = 1 
+    loc = 1 
+    diffy = 1
     
-    # CREATE VIZ_IB2D FOLDER, HIER_IB2D_DATA FOLDER and VISIT FILES
+    # CREATE VIZ_IB2D FOLDER, HIER_IB2D_DATA FOLDER FOR STORING .VTK DATA
     try:
         os.mkdir('viz_IB2d')
     except FileExistsError:
         #File already exists
         pass
-    try:
-        os.mkdir('hier_IB2d_data')
-    except FileExistsError:
-        #File already exists
-        pass
-    #I'm going to expect that vizID is a file object with write permission...?
-    vizID = 1 #JUST INITIALIZE BC dumps.visit isn't working correctly...yet
+    if Output_Params[16] == 1:
+        try:
+            os.mkdir('hier_IB2d_data')
+        except FileExistsError:
+            #File already exists
+            pass
     os.chdir('viz_IB2d')
 
+    # PRINT BRINKMAN PERMEABILITY TO MATRIX (*if BRINKMAN TERM*) %
+    if brinkman_Yes:
+        os.chdir('viz_IB2d')
+        strNUM = give_String_Number_For_VTK(ctsave)
+        brinkName = 'Brink.' + strNUM + '.vtk'
+        savevtk_scalar(Brink.T, brinkName, 'Brinkman',dx,dy)
+        #clear brinkName strNUM
+        os.chdir('..')
+
     #Save grid_Info and model_Info in human readable format
-    with open('_grid_Info.txt','w') as fobj:
-        for key in sorted(grid_Info):
-            fobj.write('{0} = {1}\n'.format(key,grid_Info[key]))
-    with open('_model_Info.txt','w') as fobj:
-        for key in sorted(model_Info):
-            fobj.write('{0} = {1}\n'.format(key,model_Info[key]))
+    #with open('_grid_Info.txt','w') as fobj:
+    #    for key in sorted(grid_Info):
+    #        fobj.write('{0} = {1}\n'.format(key,grid_Info[key]))
+    #with open('_model_Info.txt','w') as fobj:
+    #    for key in sorted(model_Info):
+    #        fobj.write('{0} = {1}\n'.format(key,model_Info[key]))
     #vizID = open('dumps.visit','w')
     #vizID.write('!NBLOCKS 6\n')
     #os.chdir('..')
     
     #Initialize Vorticity, uMagnitude, and Pressure for initial colormap
     #Print initializations to .vtk
-    vort = np.zeros((Ny,Nx)); uMag = np.array(vort); p = np.array(vort)
+    vort = np.zeros((Nx,Ny)) 
+    uMag = np.array(vort) 
+    p = np.array(vort)
     lagPts = np.zeros((xLag.size,3))
-    lagPts[:,0] = xLag; lagPts[:,1] = yLag
+    lagPts[:,0] = xLag 
+    lagPts[:,1] = yLag
     connectsMat,spacing = give_Me_Lag_Pt_Connects(ds,xLag,yLag,Nx,springs_Yes,springs_info)
-    Fxh = np.array(vort); Fyh =np.array(vort); F_Lag = np.zeros((xLag.size,2)) 
-    print_vtk_files(ctsave,vizID,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,\
+    Fxh = np.array(vort) 
+    Fyh =np.array(vort) 
+    F_Lag = np.zeros((xLag.size,2)) 
+    print_vtk_files(Output_Params,ctsave,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,\
     connectsMat,tracers,concentration_Yes,C,Fxh,Fyh,F_Lag)
+    print('\n |****** Begin IMMERSED BOUNDARY SIMULATION! ******| \n\n')
     print('Current Time(s): {0}\n'.format(current_time))
     ctsave += 1
     
@@ -412,8 +702,8 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
         #******Step 1: Update Position of Boundary of membrane at half time-step ******
         #                 (Variables end with h if it is a half-step)
         #
-        xLag_h,yLag_h = please_Move_Lagrangian_Point_Positions(U, V, xLag, yLag,\
-            xLag, yLag, x, y, dt/2, grid_Info, 0)
+        xLag_h,yLag_h = please_Move_Lagrangian_Point_Positions(mu, U, V, xLag, yLag,\
+            xLag, yLag, x, y, dt/2, grid_Info, 0, poroelastic_Yes, poroelastic_info, F_Poro)
             
         if mass_Yes:
             mass_info, massLagsOld = please_Move_Massive_Boundary(dt/2,\
@@ -434,6 +724,11 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
             #This function is application specific, located with main2d
             beams_info = update_Beams(dt,current_time,beams_info)
 
+        if update_nonInv_Beams_Flag and nonInv_beams_Yes:
+            from update_nonInv_Beams import update_nonInv_Beams
+            #This function is application specific, located with main2d
+            nonInv_beams_info = update_nonInv_Beams(dt,current_time,beams_info)    
+
         if update_D_Springs_Flag and d_Springs_Yes:
             from update_Damped_Springs import update_Damped_Springs
             #This function is application specific, located with main2d
@@ -445,9 +740,10 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
         #*******STEP 2: Calculate Force coming from membrane at half time-step ********
         #
         #
-        Fxh, Fyh, F_Mass_Bnd, F_Lag = please_Find_Lagrangian_Forces_On_Eulerian_grid(\
-        dt, current_time, xLag_h, yLag_h, xLag_P, yLag_P, x, y, grid_Info, model_Info,\
-        springs_info, target_info, beams_info, muscles_info, muscles3_info, mass_info, d_springs_info)
+        Fxh, Fyh, F_Mass_Bnd, F_Lag, F_Poro = please_Find_Lagrangian_Forces_On_Eulerian_grid(\
+        dt, current_time, xLag_h, yLag_h, xLag_P, yLag_P, x, y, grid_Info, Lag_Struct_Params,\
+        springs_info, target_info, beams_info, nonInv_beams_info, muscles_info, muscles3_info,\
+        mass_info, d_springs_info, gen_force_info, poroelastic_info)
         
         # Once force is calculated, can finish time-step for massive boundary
         if mass_Yes: #need to test
@@ -482,9 +778,23 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
         #******************* STEP 3: Solve for Fluid motion ************************
         #
         #
-        Uh, Vh, U, V, p =   please_Update_Fluid_Velocity(U, V, Fxh, Fyh, rho, mu,\
-        grid_Info, dt)
+
+        # Add in effect from BOUSSINESQ
+        if boussinesq_Yes:
+            #Fxh = Fxh + rho*np.dot(fBouss_X,C)
+            #Fyh = Fyh + rho*np.dot(fBouss_Y,C)
+            Fxh = Fxh + rho*fBouss_X*C #np.dot(fBouss_X,C)
+            Fyh = Fyh + rho*fBouss_Y*C #rho*np.dot(fBouss_Y,C)
+
+        # Add in effect from BRINKMAN 
+        if brinkman_Yes:
+            Fxh = Fxh - mu*Brink*U; # ADD BRINKMAN TERM!
+            Fyh = Fyh - mu*Brink*V; # ADD BRINKMAN TERM!
         
+        # Update fluid motion
+        Uh, Vh, U, V, p =   please_Update_Fluid_Velocity(U, V, Fxh, Fyh, rho, mu, grid_Info, dt, idX, idY)
+
+
         
         #
         #
@@ -494,10 +804,11 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
         xLag_P = np.array(xLag_h)   # Stores old Lagrangian x-Values (for muscle model)
         yLag_P = np.array(yLag_h)   # Stores old Lagrangian y-Values (for muscle model)
         #Uh, Vh instead of U,V?
-        xLag, yLag = please_Move_Lagrangian_Point_Positions(Uh, Vh, xLag, yLag,\
-            xLag_h, yLag_h, x, y, dt, grid_Info,porous_Yes)
+        xLag, yLag = please_Move_Lagrangian_Point_Positions(mu, Uh, Vh, xLag, yLag,\
+            xLag_h, yLag_h, x, y, dt, grid_Info,porous_Yes, poroelastic_Yes, poroelastic_info, F_Poro)
             
-        #NOTE: ONLY SET UP FOR CLOSED SYSTEMS NOW!!!
+
+        # NOTE: SET UP FOR BOTH CLOSED + OPEN SYSTEMS NOW!!!
         if porous_Yes: #need to test
             Por_Mat,nX,nY = please_Compute_Porous_Slip_Velocity(ds,xLag,yLag,\
                 porous_info,F_Lag)
@@ -526,7 +837,7 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
            C = please_Update_Adv_Diff_Concentration(C,dt,dx,dy,U,V,kDiffusion)
            
         # Save/Plot Lagrangian/Eulerian Dynamics! #
-        if ( cter % pDump == 0 and cter >= pDump ):
+        if ( ( cter % pDump == 0) and (cter >= pDump) ):
             
             #Compute vorticity, uMagnitude
             vort = give_Me_Vorticity(U,V,dx,dy)
@@ -540,7 +851,7 @@ def main(struct_name, mu, rho, grid_Info, dt, T_FINAL, model_Info):
             
             #Print .vtk files!
             lagPts = np.vstack((xLag, yLag, np.zeros(xLag.size))).T
-            print_vtk_files(ctsave,vizID,vort,uMag.T,p.T,U.T,V.T,Lx,Ly,Nx,Ny,\
+            print_vtk_files(Output_Params,ctsave,vort,uMag.T,p.T,U.T,V.T,Lx,Ly,Nx,Ny,\
                 lagPts,springs_Yes,connectsMat,tracers,concentration_Yes,C,Fxh.T,Fyh.T,F_Lag)
             
             #Print Current Time
@@ -640,6 +951,33 @@ def read_In_Concentration_Info(struct_name):
         C = np.loadtxt(f)
 
     return (C,kDiff)
+
+
+###########################################################################
+#
+# FUNCTION: Reads in the Brinkman permeability, k and initial Brinkman term, Brink
+#
+###########################################################################
+
+def read_In_Brinkman_Info(struct_name):
+    ''' Reads in the diffusion coefficient and initial concentration, C
+    
+    Args:
+        struct_name: structure name
+        
+    Returns:
+        Brink:  initial Brinkman region (1/kBrink)
+        kBrink: coefficient of permeability'''
+
+    filename = struct_name+'.brinkman'  #Name of file to read in
+    
+    with open(filename) as f:
+        kBrink = float(f.readline().strip()) #first line contains coeff of diff
+        C = np.loadtxt(f)
+
+    return (Brink,kBrink)
+
+
     
 ###########################################################################
 #
@@ -658,16 +996,15 @@ def read_Spring_Points(struct_name):
         springs: above info stored in columns'''
 
     filename = struct_name+'.spring'  #Name of file to read in
-    with open(filename) as f:
-    #Store elements on .spring file into a matrix starting w/ 2nd row of read in data.
-        #springs = np.loadtxt(f,skiprows=1,usecols=(0,1,2,3))  # <-- this works w/o non-linearity
-
-        df = pd.read_table(f, sep='\s+',skiprows=0) # Read in table
-        df = df.reset_index()                       # Resets the header
-        df.fillna(1, inplace=True)                  # Fills in missing values with "1" (linear spring case)
-
-    # Convert pandas DataFrame to NUMPY Array
-    springs = df.values
+    try:
+        springs = np.genfromtxt(filename,skip_header=1,
+            missing_values=['-NaN', '-nan', 'N/A', 'NA', 'NULL', 'NaN', 'nan'],filling_values=1)
+    except ValueError:
+        print('Failed to load spring data from {}.\n'.format(filename)+
+              'Check that all rows (after the first) have the same number of columns\n'+
+              'N/A, NA, NULL, NaN, and nan can be used to denote missing values if\n'+
+              'linear and non-linear springs are mixed (these entries will be replaced with a 1).')
+        raise
 
     # If no specified degreee on non-linearity in .spring file
     n,m = springs.shape
@@ -868,6 +1205,38 @@ def read_Porous_Points(struct_name):
 
 
 
+###########################################################################
+#
+# FUNCTION: Reads in the # of POROUS PTS, POROUS-PT-NODEs, and their
+#           POROUSITY-COEFFICIENTS
+#
+###########################################################################
+
+def read_PoroElastic_Points(struct_name):
+    ''' Reads in the num of porous pts, pt-nodes, and porousity coefficients
+    
+    Args:
+        struct_name: structure name
+        
+    Returns:
+        porosity: array of porosity info'''
+
+    filename = struct_name+'.poroelastic'  #Name of file to read in
+    with open(filename) as f:
+        porosity = np.loadtxt(f,skiprows=1,usecols=(0,1))
+
+    #porous:  col 1: Lag Pt. ID w/ Associated Porous Pt.
+    #         col 2: Brinkman coefficient
+    
+    return porosity
+
+
+
+
+
+
+
+
 
 
 ###########################################################################
@@ -897,6 +1266,62 @@ def read_Beam_Points(struct_name):
     #            col 5: curavture
     
     return beams
+
+
+###########################################################################
+#
+# FUNCTION: Reads in the # of beams and all 1st Pt, MIDDLE Pt, and 3rd Pt
+#           beam STIFFNESSES, and CURVATURE for NON-INVARIANT BEAMS
+#
+###########################################################################
+
+def read_nonInv_Beam_Points(struct_name):
+    ''' Reads in the num of beams, 1st pt, middle pt, 3 pt stiffness, curvature
+    
+    Args:
+        struct_name: structure name
+        
+    Returns:
+        beams: array of beam info'''
+
+    filename = struct_name+'.nonInv_beam'  #Name of file to read in
+    with open(filename) as f:
+        beams = np.loadtxt(f,skiprows=1,usecols=(0,1,2,3,4,5))
+
+    #beams:      col 1: 1ST PT.
+    #            col 2: MIDDLE PT. (where force is exerted)
+    #            col 3: 3RD PT.
+    #            col 4: beam stiffness
+    #            col 5: curavture
+    
+    return beams   
+
+
+###########################################################################
+#
+# FUNCTION: READS IN ALL THE DATA FOR THE USER-DEFINED FORCE FUNCTION!!!
+#           NOTE: DOES NOT SPECIFY HOW MANY PARAMETERS THERE ARE.
+#           NOTE: COMPLETELY USER-DEFINED
+#
+###########################################################################
+
+def  read_General_Forcing_Function(struct_name):
+    ''' Reads in all data from user defined force .user_force file
+    
+    Args: 
+        struct_name: structure name
+        
+    Returns:
+        All parameters set by user for user-defined force'''
+
+    filename = struct_name+'.user_force'  #Name of file to read in
+    with open(filename) as f:
+        # First line in the file contains the number of Lagrangian points
+        N = int(f.readline().strip())
+        # Read in the Lagrangian mesh points
+        force_general = np.loadtxt(f,unpack=True)
+
+    return force_general   
     
     
 ##############################################################################
@@ -925,14 +1350,14 @@ def give_Me_Lag_Pt_Connects(ds,xLag,yLag,Nx,springs_Yes,springs_info):
 
     space = 20*ds
 
-    nSprings = springs_info.shape;
+    nSprings = springs_info.shape
     connectsMat = np.zeros([nSprings[0],2])
 
     if springs_Yes:
-        connectsMat[:,0] = springs_info[:,0]; # (for .vtk counting)
-        connectsMat[:,1] = springs_info[:,1]; # (for .vtk counting)
+        connectsMat[:,0] = springs_info[:,0] # (for .vtk counting)
+        connectsMat[:,1] = springs_info[:,1] # (for .vtk counting)
     else:
-        connectsMat = 0;
+        connectsMat = 0
 
     #N = xLag.size
 
@@ -969,11 +1394,31 @@ def give_Me_Lag_Pt_Connects(ds,xLag,yLag,Nx,springs_Yes,springs_info):
 #
 ##############################################################################
 
-def print_vtk_files(ctsave,vizID,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,\
+def print_vtk_files(Output_Params,ctsave,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,\
     connectsMat,tracers,concentration_Yes,C,fXGrid,fYGrid,F_Lag):
     ''' Gives appropriate string number for filename in printing the .vtk files'''
 
-    #Give spacing for grid
+
+    #               Output_Params[0]: print_dump
+    #                            [1]: plot_Matlab
+    #                            [2]: plot_LagPts
+    #                            [3]: plot_Velocity
+    #                            [4]: plot_Vorticity
+    #                            [5]: plot_MagVelocity
+    #                            [6]: plot_Pressure
+    #                            [7]:  save_Vorticity 
+    #                            [8]:  save_Pressure 
+    #                            [9]: save_uVec 
+    #                            [10]: save_uMag 
+    #                            [11]: save_uX 
+    #                            [12]: save_uY 
+    #                            [13]: save_fMag 
+    #                            [14]: save_fX 
+    #                            [15]: save_fY 
+    #                            [16]: save_hier 
+
+
+    #Give EULERIAN spacing for grid
     dx = Lx/Nx 
     dy = Ly/Ny
 
@@ -984,15 +1429,6 @@ def print_vtk_files(ctsave,vizID,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,
 
     #Find string number for storing files
     strNUM = give_String_Number_For_VTK(ctsave)
-    vortfName = 'Omega.'+strNUM+'.vtk'
-    uMagfName = 'uMag.'+strNUM+'.vtk'
-    pfName = 'P.'+strNUM+'.vtk'
-    uXName = 'uX.'+strNUM+'.vtk'
-    uYName = 'uY.'+strNUM+'.vtk'
-    fXName = 'fX.'+strNUM+'.vtk'
-    fYName = 'fY.'+strNUM+'.vtk'
-    fMagName = 'fMag.'+strNUM+'.vtk'
-    velocityName = 'u.'+strNUM+'.vtk'
     lagPtsName = 'lagsPts.'+strNUM+'.vtk'
 
     #Print Lagrangian Pts to .vtk format
@@ -1009,32 +1445,49 @@ def print_vtk_files(ctsave,vizID,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,
         tracersPtsName = 'tracer.'+strNUM+'.vtk'
         #tMatrix = tracers[:,1:4]
         savevtk_points(tracers[:,1:4],tracersPtsName, 'tracers') 
-            
-    #Print another cycle to .visit file
-    #vizID.write(vortfName+'\n')
-    #vizID.write(uMagfName+'\n')
-    #vizID.write(pfName+'\n')
-    #vizID.write(uXName+'\n')
-    #vizID.write(uYName+'\n')
-    #vizID.write(velocityName+'\n')
 
 
     #Print SCALAR DATA (i.e., colormap data) to .vtk file
-    savevtk_scalar(vort, vortfName, 'Omega',dx,dy)
-    savevtk_scalar(uMag, uMagfName, 'uMag',dx,dy)
-    savevtk_scalar(p, pfName, 'P',dx,dy)
-    savevtk_scalar(U, uXName, 'uX',dx,dy)
-    savevtk_scalar(V, uYName, 'uY',dx,dy)
-    savevtk_scalar(fXGrid, fXName, 'fX',dx,dy)
-    savevtk_scalar(fYGrid, fYName, 'fY',dx,dy)
-    savevtk_scalar(np.sqrt( fXGrid*fXGrid + fYGrid*fYGrid ), fMagName, 'fMag',dx,dy)
+    if Output_Params[7] == 1:
+        vortfName = 'Omega.'+strNUM+'.vtk'
+        savevtk_scalar(vort, vortfName, 'Omega',dx,dy)
+
+    if Output_Params[8] == 1:
+        pfName = 'P.'+strNUM+'.vtk'
+        savevtk_scalar(p, pfName, 'P',dx,dy)
+
+    if Output_Params[10] == 1:
+        uMagfName = 'uMag.'+strNUM+'.vtk'
+        savevtk_scalar(uMag, uMagfName, 'uMag',dx,dy)
+
+    if Output_Params[11] == 1:
+        uXName = 'uX.'+strNUM+'.vtk'
+        savevtk_scalar(U, uXName, 'uX',dx,dy)
+    
+    if Output_Params[12] == 1:
+        uYName = 'uY.'+strNUM+'.vtk'    
+        savevtk_scalar(V, uYName, 'uY',dx,dy)
+
+    if Output_Params[14] == 1:
+        fXName = 'fX.'+strNUM+'.vtk'
+        savevtk_scalar(fXGrid, fXName, 'fX',dx,dy)
+
+    if Output_Params[15] == 1:
+        fYName = 'fY.'+strNUM+'.vtk'
+        savevtk_scalar(fYGrid, fYName, 'fY',dx,dy)
+    
+    if Output_Params[13] == 1:
+        fMagName = 'fMag.'+strNUM+'.vtk'
+        savevtk_scalar(np.sqrt( fXGrid*fXGrid + fYGrid*fYGrid ), fMagName, 'fMag',dx,dy)
 
     if concentration_Yes:
         confName = 'concentration.'+strNUM+'.vtk'
         savevtk_scalar(C.T, confName, 'Concentration',dx,dy)
 
     #Print VECTOR DATA (i.e., velocity data) to .vtk file
-    savevtk_vector(U, V, velocityName, 'u',dx,dy)
+    if Output_Params[9] == 1:
+        velocityName = 'u.'+strNUM+'.vtk'
+        savevtk_vector(U, V, velocityName, 'u',dx,dy)
 
     #Get out of viz_IB2d folder
     os.chdir('..')
@@ -1045,55 +1498,57 @@ def print_vtk_files(ctsave,vizID,vort,uMag,p,U,V,Lx,Ly,Nx,Ny,lagPts,springs_Yes,
     #
     NLagPts = lagPts.shape[1]
     
+    if Output_Params[16] == 1:
+
     # THE CASE IF LESS THAN (or =) to 5 Lag. Pts. 
-    if NLagPts <= 5:
-        os.chdir('hier_IB2d_data') #change directory to hier-data folder
+        if NLagPts <= 5:
+            os.chdir('hier_IB2d_data') #change directory to hier-data folder
         
-        # Save x-y force data!
-        fLag_XName = 'fX_Lag.'+strNUM+'.vtk';
-        fLag_YName = 'fY_Lag.'+strNUM+'.vtk';
-        savevtk_points_with_scalar_data( lagPts, F_Lag[:,0], fLag_XName, 'fX_Lag');
-        savevtk_points_with_scalar_data( lagPts, F_Lag[:,1], fLag_YName, 'fY_Lag');
+            # Save x-y force data!
+            fLag_XName = 'fX_Lag.'+strNUM+'.vtk'
+            fLag_YName = 'fY_Lag.'+strNUM+'.vtk'
+            savevtk_points_with_scalar_data( lagPts, F_Lag[:,0], fLag_XName, 'fX_Lag')
+            savevtk_points_with_scalar_data( lagPts, F_Lag[:,1], fLag_YName, 'fY_Lag')
 
-        # Define force magnitude name
-        fMagName = 'fMag.'+strNUM+'.vtk'
+            # Define force magnitude name
+            fMagName = 'fMag.'+strNUM+'.vtk'
         
-        # Compute magnitude of forces on Lagrangian boundary
-        fLagMag = np.sqrt( F_Lag[:,0]*F_Lag[:,0] + F_Lag[:,1]*F_Lag[:,1] ) 
+            # Compute magnitude of forces on Lagrangian boundary
+            fLagMag = np.sqrt( F_Lag[:,0]*F_Lag[:,0] + F_Lag[:,1]*F_Lag[:,1] ) 
         
-        # Print UNSTRUCTURED POINT DATA w/ SCALAR associated with it
-        savevtk_points_with_scalar_data( lagPts, fLagMag, fMagName, 'fMag')
+            # Print UNSTRUCTURED POINT DATA w/ SCALAR associated with it
+            savevtk_points_with_scalar_data( lagPts, fLagMag, fMagName, 'fMag')
         
-        # Get out of hier_IB2d_data folder
-        os.chdir('..') 
+            # Get out of hier_IB2d_data folder
+            os.chdir('..') 
     
-    # THE CASE IF GREATER THAN 5 Lag. Pts. 
-    else:
-        F_Tan_Mag,F_Normal_Mag = please_Compute_Normal_Tangential_Forces_On_Lag_Pts(lagPts,F_Lag)
+        # THE CASE IF GREATER THAN 5 Lag. Pts. 
+        else:
+            F_Tan_Mag,F_Normal_Mag = please_Compute_Normal_Tangential_Forces_On_Lag_Pts(lagPts,F_Lag)
 
-        os.chdir('hier_IB2d_data') #change directory to hier-data folder
+            os.chdir('hier_IB2d_data') #change directory to hier-data folder
 
-        # Save x-y force data!
-        fLag_XName = 'fX_Lag.'+strNUM+'.vtk';
-        fLag_YName = 'fY_Lag.'+strNUM+'.vtk';
-        savevtk_points_with_scalar_data( lagPts, F_Lag[:,0], fLag_XName, 'fX_Lag');
-        savevtk_points_with_scalar_data( lagPts, F_Lag[:,1], fLag_YName, 'fY_Lag');
+            # Save x-y force data!
+            fLag_XName = 'fX_Lag.'+strNUM+'.vtk'
+            fLag_YName = 'fY_Lag.'+strNUM+'.vtk'
+            savevtk_points_with_scalar_data( lagPts, F_Lag[:,0], fLag_XName, 'fX_Lag')
+            savevtk_points_with_scalar_data( lagPts, F_Lag[:,1], fLag_YName, 'fY_Lag')
 
-        # Save force magnitude, mag. normal force, and mag. tangential force
-        fMagName = 'fMag.'+strNUM+'.vtk'
-        fNormalName = 'fNorm.'+strNUM+'.vtk'
-        fTangentName = 'fTan.'+strNUM+'.vtk'
+            # Save force magnitude, mag. normal force, and mag. tangential force
+            fMagName = 'fMag.'+strNUM+'.vtk'
+            fNormalName = 'fNorm.'+strNUM+'.vtk'
+            fTangentName = 'fTan.'+strNUM+'.vtk'
 
-        # Compute magnitude of forces on Lagrangian boundary
-        fLagMag = np.sqrt( F_Lag[:,0]*F_Lag[:,0] + F_Lag[:,1]*F_Lag[:,1] ); 
+            # Compute magnitude of forces on Lagrangian boundary
+            fLagMag = np.sqrt( F_Lag[:,0]*F_Lag[:,0] + F_Lag[:,1]*F_Lag[:,1] )
 
-        # Print UNSTRUCTURED POINT DATA w/ SCALAR associated with it
-        savevtk_points_with_scalar_data( lagPts, fLagMag, fMagName, 'fMag');
-        savevtk_points_with_scalar_data( lagPts, F_Normal_Mag, fNormalName, 'fNorm');
-        savevtk_points_with_scalar_data( lagPts, F_Tan_Mag, fTangentName, 'fTan');
+            # Print UNSTRUCTURED POINT DATA w/ SCALAR associated with it
+            savevtk_points_with_scalar_data( lagPts, fLagMag, fMagName, 'fMag')
+            savevtk_points_with_scalar_data( lagPts, F_Normal_Mag, fNormalName, 'fNorm')
+            savevtk_points_with_scalar_data( lagPts, F_Tan_Mag, fTangentName, 'fTan')
 
-        # Get out of hier_IB2d_data folder
-        os.chdir('..') 
+            # Get out of hier_IB2d_data folder
+            os.chdir('..') 
     
     
 ##############################################################################
@@ -1140,12 +1595,38 @@ def savevtk_points_connects( X, filename, vectorName,connectsMat):
     N = X.shape[0]
     Nc = connectsMat.shape[0]
 
-    if C_flag==True:
+    if C_flag:
         #Just add the measure of time for transforming the 
         nX = np.ascontiguousarray(X, dtype=np.float64)
         nconnectsMat = np.ascontiguousarray(connectsMat, dtype=np.float64)
         write.savevtk_points_connects_write(N,Nc,nX,filename,vectorName,nconnectsMat)
-
+    elif vtk_lib_flag:
+        ### UNSTRUCTURED_GRID - POINTS, CELLS, CELL_TYPES ###
+        # Create Points data type
+        vtk_points = vtk.vtkPoints()
+        vtk_points.SetData(numpy_support.numpy_to_vtk(
+                           np.require(X, dtype=np.float64, requirements=['C']),
+                           deep=1))
+        # Create CellArray data type
+        vtk_cells = vtk.vtkCellArray()
+        # Create connectivity list
+        cells = np.ones((Nc,3), dtype=np.int64)
+        cells[:,0] *= connectsMat.shape[1]
+        cells[:,1:] = connectsMat.astype(np.int64)
+        cells = np.ravel(cells)
+        # Create cell structure with args: number of cells, connectivity list
+        vtk_cells.SetCells(Nc, numpy_support.numpy_to_vtkIdTypeArray(cells))
+        vtk_obj = vtk.vtkUnstructuredGrid()
+        # Set cells with cell types, cell structure
+        vtk_obj.SetCells(np.ones(Nc, dtype=np.int64)*3, vtk_cells)
+        vtk_obj.SetPoints(vtk_points)
+        # write out
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName(filename)
+        writer.SetHeader(vectorName+" generated by IB2d Python")
+        writer.SetInputDataObject(vtk_obj)
+        writer.Update()
+        writer.Write()
     else:
         with open(filename,'w') as file:
             file.write('# vtk DataFile Version 2.0\n')
@@ -1187,9 +1668,38 @@ def savevtk_points( X, filename, vectorName):
 
     N = X.shape[0]
 
-    if C_flag == True:
+    if C_flag:
         nX = np.ascontiguousarray(X, dtype=np.float64)
         write.savevtk_points_write(N,nX,filename,vectorName)
+    elif vtk_lib_flag:
+        ### UNSTRUCTURED_GRID - POINTS, CELLS, CELL_TYPES ###
+        # Create Points data type
+        vtk_points = vtk.vtkPoints()
+        vtk_points.SetData(numpy_support.numpy_to_vtk(
+                           np.require(X, dtype=np.float64, requirements=['C']),
+                           deep=1))
+        # Create CellArray data type
+        vtk_cells = vtk.vtkCellArray()
+        # Create connectivity list
+        cells = np.stack((np.ones(N,dtype=np.int64), np.arange(N,dtype=np.int64)),
+                         axis=-1)
+        cells_r = np.ravel(cells)
+        # Create cell structure with args: number of cells, connectivity list
+        vtk_cells.SetCells(N, numpy_support.numpy_to_vtkIdTypeArray(cells_r))
+        vtk_obj = vtk.vtkUnstructuredGrid()
+        # Set cells with cell types, cell structure
+        if cells.shape[0] > 1:
+            vtk_obj.SetCells(cells[:,0], vtk_cells)
+        else:
+            vtk_obj.SetCells(cells[0,0], vtk_cells)
+        vtk_obj.SetPoints(vtk_points)
+        # write out
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName(filename)
+        writer.SetHeader(vectorName+" generated by IB2d Python")
+        writer.SetInputDataObject(vtk_obj)
+        writer.Update()
+        writer.Write()
     else:
         with open(filename,'w') as file:
             file.write('# vtk DataFile Version 2.0\n')
@@ -1214,43 +1724,6 @@ def savevtk_points( X, filename, vectorName):
 
 
 
-
-    #TRY PRINTING THEM AS POLYGONAL DATA
-    # with open(filename,'w') as file:
-        # file.write('# vtk DataFile Version 2.0\n')
-        # file.write(vectorName+'\n')
-        # file.write('ASCII\n')
-        # file.write('DATASET STRUCTURED_GRID\n')
-        # file.write('DIMENSIONS 64 1 1\n')
-        # file.write('POINTS {0} float\n', N)
-        # for ii in range(N):
-            # file.write('{0:.15e} {1:.15e} {2:.15e}\n'.format(X[ii,0],X[ii,1],X[ii,2]))
-        # file.write('1.1 1.1 0\n')
-        # file.write('CELL_DATA 1\n')
-        # file.write('POINT_DATA {0} \n',N)
-        # file.write('FIELD FieldData 1\n')
-        # file.write('nodal 1 {0} float\n'.format(N)
-        # file.write('0 1 1.1 2\n')
-        # file.write('SCALARS nodal float\n')
-        # file.write('SCALARS '+vectorName+' float 1 \n')
-        # file.write('LOOKUP_TABLE default\n')
-
-
-    # TRY PRINTING THEM AS POINTS
-    # with open(filename,'w') as file:
-        # file.write('# vtk DataFile Version 2.0\n')
-        # file.write('Cube example\n')
-        # file.write('ASCII\n')
-        # file.write('DATASET UNSTRUCTURED_GRID\n')
-        # file.write('POINTS {0} float\n'.format(N))
-        # for ii in range(N):
-            # file.write('{0:.15e} {1:.15e} {2:.15e}\n'.format(X[ii,0],X[ii,1],X[ii,2]))
-        # file.write('POINT_DATA {0} \n'.format(N)
-        # file.write('SCALARS '+vectorName+' float 1 \n')
-        # file.write('LOOKUP_TABLE default\n')
-
-
-
 ##############################################################################
 #
 # FUNCTION: prints matrix vector data to vtk formated file
@@ -1263,7 +1736,7 @@ def savevtk_vector(X, Y, filename, vectorName,dx,dy):
         X: 2-D ndarray
         Y: 2-D ndarray
         filename: file name
-        vectorName:
+        vectorName: name of the variable
         dx:
         dy:'''
     #  ?? Legacy:
@@ -1276,24 +1749,46 @@ def savevtk_vector(X, Y, filename, vectorName,dx,dy):
     #   3-D is clearly broken in this code, but there were still some reminants 
     #   in the matlab version. Given the choice of doing try/except blocks to
     #   keep these reminants or to kill them entirely, I'm choosing to kill them.
-    #   So, specifically, nz is now gone. I will keep the output the same,
-    #   however, for compatibility. So 1 will be pritned in the Z column.
+    #   So, specifically, nz is now gone.
     
-    #I'm changing the fprintf that was here to an error. If you want, you can
-    #   catch it in the following function.
     assert (X.shape == Y.shape), 'Error: velocity arrays of unequal size'
     nx, ny = X.shape
     
+
     XRow = X.shape[0]
     XCol = X.shape[1]
     YRow = Y.shape[0]
     YCol = Y.shape[1]
 
 
-    if C_flag == True:
+    if C_flag:
         nX = np.ascontiguousarray(X, dtype=np.float64)
         nY = np.ascontiguousarray(Y, dtype=np.float64)
         write.savevtk_vector(XRow,XCol,YRow,YCol,nX,nY,filename,vectorName,dx,dy)
+    elif vtk_lib_flag:
+        ### STRUCTURED_POINTS - VECTORS ###
+        # Collect info to write
+        origin = (0.0, 0.0, 0.0)
+        spacing = (dx, dy, 1.0)
+        dimensions = (nx, ny, 1)
+        vec_array = np.require(np.stack((np.ravel(X,order='F'),
+                               np.ravel(Y,order='F'), np.zeros(Y.size)), axis=-1),
+                               requirements=['C'])
+        vtk_array = numpy_support.numpy_to_vtk(vec_array)
+        vtk_array.SetName(vectorName)
+        # Create data object
+        vtk_obj = vtk.vtkStructuredPoints()
+        vtk_obj.SetOrigin(origin)
+        vtk_obj.SetSpacing(spacing)
+        vtk_obj.SetDimensions(dimensions)
+        vtk_obj.GetPointData().SetVectors(vtk_array)
+        # Write out data
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName(filename)
+        writer.SetHeader("Generated by IB2d Python")
+        writer.SetInputDataObject(vtk_obj)
+        writer.Update()
+        writer.Write()
     else:
         with open(filename,'w') as fid:
             fid.write('# vtk DataFile Version 2.0\n')
@@ -1302,7 +1797,7 @@ def savevtk_vector(X, Y, filename, vectorName,dx,dy):
             fid.write('\n')
             fid.write('DATASET STRUCTURED_POINTS\n')
             # 1 below was nz
-            fid.write('DIMENSIONS    {0}   {1}   {2}\n'.format(nx, ny, 1))
+            fid.write('DIMENSIONS    {0}   {1}   {2}\n'.format(ny, nx, 1))
             fid.write('\n')
             fid.write('ORIGIN    0.000   0.000   0.000\n')
             #fid.write('SPACING   1.000   1.000   1.000\n') #if want [1,32]x[1,32] rather than [0,Lx]x[0,Ly]
@@ -1325,15 +1820,16 @@ def savevtk_vector(X, Y, filename, vectorName,dx,dy):
 # FUNCTION: prints scalar matrix to vtk formated file
 #
 ##############################################################################
-def savevtk_scalar(array, filename, colorMap,dx,dy):
+def savevtk_scalar(array, filename, dataName,dx,dy):
     ''' Prints scalar matrix to vtk formatted file.
     
     Args:
         array: 2-D ndarray
         filename: file name
-        colorMap:
+        dataName: string describing the data
         dx:
         dy:'''
+
     #  ?? Legacy:
     #  savevtk Save a 3-D scalar array in VTK format.
     #  savevtk(array, filename) saves a 3-D array of any size to
@@ -1343,12 +1839,33 @@ def savevtk_scalar(array, filename, colorMap,dx,dy):
     #   3-D is clearly broken in this code, but there were still some reminants 
     #   in the matlab version. Given the choice of doing try/except blocks to
     #   keep these reminants or to kill them entirely, I'm choosing to kill them.
-    #   So, specifically, nz is now gone. I will keep the output the same,
-    #   however, for compatibility. So 1 will be pritned in the Z column.
-    nx,ny = array.shape
-    if C_flag == True:
+    #   So, specifically, nz is now gone.
+    ny,nx = array.shape
+    if C_flag:
         narray = np.ascontiguousarray(array, dtype=np.float64)
-        write.savevtk_scalar(nx,ny,narray,filename,colorMap,dx,dy)
+        write.savevtk_scalar(ny,nx,narray,filename,dataName,dx,dy)
+    elif vtk_lib_flag:
+        ### STRUCTURED_POINTS - SCALARS ###
+        # Collect info to write
+        origin = (0.0, 0.0, 0.0)
+        spacing = (dx, dy, 1.0)
+        dimensions = (ny, nx, 1)
+        array_r = np.ravel(array,order='F')
+        vtk_array = numpy_support.numpy_to_vtk(array_r)
+        vtk_array.SetName(dataName)
+        # Create data object
+        vtk_obj = vtk.vtkStructuredPoints()
+        vtk_obj.SetOrigin(origin)
+        vtk_obj.SetSpacing(spacing)
+        vtk_obj.SetDimensions(dimensions)
+        vtk_obj.GetPointData().SetScalars(vtk_array)
+        # Write out data
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName(filename)
+        writer.SetHeader("Generated by IB2d Python")
+        writer.SetInputDataObject(vtk_obj)
+        writer.Update()
+        writer.Write()
     else:
         with open(filename,'w') as fid:
             fid.write('# vtk DataFile Version 2.0\n')
@@ -1357,7 +1874,7 @@ def savevtk_scalar(array, filename, colorMap,dx,dy):
             fid.write('\n')
             fid.write('DATASET STRUCTURED_POINTS\n')
             # 1 below was nz
-            fid.write('DIMENSIONS    {0}   {1}   {2}\n'.format(nx, ny, 1))
+            fid.write('DIMENSIONS    {0}   {1}   {2}\n'.format(ny, nx, 1))
             fid.write('\n')
             fid.write('ORIGIN    0.000   0.000   0.000\n')
             #fid.write('SPACING   1.000   1.000   1.000\n') #if want [1,32]x[1,32] rather than [0,Lx]x[0,Ly]
@@ -1365,11 +1882,11 @@ def savevtk_scalar(array, filename, colorMap,dx,dy):
             fid.write('\n')
             # The 1 below was nz
             fid.write('POINT_DATA   {0}\n'.format(nx*ny*1))
-            fid.write('SCALARS '+colorMap+' double\n')
+            fid.write('SCALARS '+dataName+' double\n')
             fid.write('LOOKUP_TABLE default\n')
             fid.write('\n')
-            for b in range(ny):
-                for c in range(nx):
+            for b in range(nx):
+                for c in range(ny):
                     fid.write('{0} '.format(array[c,b]))
                 fid.write('\n')
         #Python 3.5 automatically opens in text mode unless otherwise specified
@@ -1382,14 +1899,14 @@ def savevtk_scalar(array, filename, colorMap,dx,dy):
 #
 ##############################################################################
 
-def savevtk_points_with_scalar_data( X, scalarArray, filename, colorMap):
+def savevtk_points_with_scalar_data( X, scalarArray, filename, dataName):
     ''' Prints matrix vector data to vtk formated file
     
     Args:
         X: Matrix of size Nx3
         scalarArray:
         filename:
-        colorMap:'''
+        dataName: string describing the data'''
 
     # X is matrix of size Nx3 
     #              Col 1: x-data
@@ -1397,19 +1914,39 @@ def savevtk_points_with_scalar_data( X, scalarArray, filename, colorMap):
     #              Col 3: z-data
     # scalarArray: Scalar array you are assigning to each point
     # filename:    What you are saving the VTK file as (string)
-    # colorMap:  What you are naming the data you're printing (string)
+    # dataName:  What you are naming the data you're printing (string)
 
     N = X.shape[0]
     nx = scalarArray.shape[0]
 
 
-    if C_flag == True:
+    if C_flag:
         nX = np.ascontiguousarray(X, dtype=np.float64)
-        write.savevtk_points_write(N,nX,filename,colorMap)
+        write.savevtk_points_write(N,nX,filename,dataName)
+    elif vtk_lib_flag:
+        ### UNSTRUCTURED_GRID - POINTS, POINT_DATA (SCALARS) ###
+        # Create Points data type
+        vtk_points = vtk.vtkPoints()
+        vtk_points.SetData(numpy_support.numpy_to_vtk(
+                           np.require(X, dtype=np.float64, requirements=['C']),
+                           deep=1))
+        scalarArray_r = np.require(scalarArray, dtype=np.float64, requirements=['C'])
+        vtk_scalarArray = numpy_support.numpy_to_vtk(scalarArray_r)
+        vtk_scalarArray.SetName(dataName)
+        vtk_obj = vtk.vtkUnstructuredGrid()
+        vtk_obj.SetPoints(vtk_points)
+        vtk_obj.GetPointData().SetScalars(vtk_scalarArray)
+        # write out
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName(filename)
+        writer.SetHeader(dataName+" generated by IB2d Python")
+        writer.SetInputDataObject(vtk_obj)
+        writer.Update()
+        writer.Write()
     else:
         with open(filename,'w') as file:
             file.write('# vtk DataFile Version 2.0\n')
-            file.write(colorMap+'\n')
+            file.write(dataName+'\n')
             file.write('ASCII\n')
             file.write('DATASET UNSTRUCTURED_GRID\n\n')
             file.write('POINTS {0} float\n'.format(N))
@@ -1418,7 +1955,7 @@ def savevtk_points_with_scalar_data( X, scalarArray, filename, colorMap):
             file.write('\n')
             #
             file.write('POINT_DATA   {0}\n'.format(nx*1*1))
-            file.write('SCALARS '+colorMap+' double\n')
+            file.write('SCALARS '+dataName+' double\n')
             file.write('LOOKUP_TABLE default\n')
             file.write('\n')
             for c in range(nx):

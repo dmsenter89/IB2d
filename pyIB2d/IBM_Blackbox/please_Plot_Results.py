@@ -27,9 +27,15 @@
 ----------------------------------------------------------------------------'''
 
 import numpy as np
+import sys
+from sys import platform
+if platform == 'darwin': # OSX backend does not support blitting
+    import matplotlib
+    matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 plt.rcParams['image.cmap'] = 'viridis'
 from math import sqrt
+import warnings
 
 ###########################################################################
 #
@@ -112,7 +118,6 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
         plt.axis([0, Lx, 0, Ly])
         plt.title('LAGRANGIAN PTS')
         plt.xlabel('x'); plt.ylabel('y')
-        plt.hold(True)
 
         loc = np.hstack((0,loc,chiX.size-1))
         for ii in range(1,loc.size):     #=2:length(loc)
@@ -136,7 +141,6 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
         plt.axis([0, Lx, 0, Ly])
         plt.title('VORTICITY')
         plt.xlabel('x'); plt.ylabel('y')
-        plt.hold(True)
 
         #Compute Vorticity and Plot It against Lagrangian Grid!
         x = X[0,:]; y = Y[:,0]
@@ -151,6 +155,8 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
             plt.plot(xTemp[0:2],yTemp[0:2],'m',linewidth=3)
         
         plt.axis('square')
+        plt.axis([0, Lx, 0, Ly])
+
 
         ct+=1
 
@@ -163,7 +169,6 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
         plt.axis([0, Lx, 0, Ly])
         plt.title('PRESSURE')
         plt.xlabel('x'); plt.ylabel('y') 
-        plt.hold(True)
 
         #Use Pressure and Plot It against Lagrangian Grid!
         x = X[0,:]; y = Y[:,0]
@@ -178,6 +183,8 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
             plt.plot(xTemp[0:2],yTemp[0:2],'m',linewidth=3)
 
         plt.axis('square')
+        plt.axis([0, Lx, 0, Ly])
+
 
         ct+=1
 
@@ -190,7 +197,6 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
         plt.axis([0, Lx, 0, Ly])
         plt.title('MAGNITUDE OF VELOCITY')
         plt.xlabel('x'); plt.ylabel('y');
-        plt.hold(True)
 
         #Use Mag. Velocity and Plot It against Lagrangian Grid!
         x = X[0,:]; y = Y[:,0]
@@ -205,6 +211,8 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
             plt.plot(xTemp[0:2],yTemp[0:2],'m',linewidth=3)
 
         plt.axis('square')
+        plt.axis([0, Lx, 0, Ly])
+
 
         ct+=1
 
@@ -217,7 +225,6 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
         plt.axis([0, Lx, 0, Ly])
         plt.title('VELOCITY')
         plt.xlabel('x'); plt.ylabel('y')
-        plt.hold(True)
 
         plt.quiver(X,Y,U,V) #Print Velocity Field
 
@@ -230,14 +237,17 @@ def please_Plot_Results(ds,X,Y,U,V,vort,uMag,p,chiX,chiY,\
             plt.plot(xTemp[0:2],yTemp[0:2],'m',linewidth=3)
 
         plt.axis('square')
+        plt.axis([0, Lx, 0, Ly])
+
         
         #ct+=1
     
-    plt.hold(False)
     plt.box(on=True)
     
     plt.draw()
-    plt.pause(0.0001) #no idea why this is necessary, but it is
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        plt.pause(0.0001) #no idea why this is necessary, but it is
 
     
 

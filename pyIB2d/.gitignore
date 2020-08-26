@@ -1,5 +1,6 @@
 # Generated data
 viz_IB2d/
+hier_IB2d_data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -58,3 +59,10 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# OSX
+# =========================
+
+.DS_Store
+.AppleDouble
+.LSOverride

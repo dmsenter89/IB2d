@@ -70,8 +70,8 @@ if first == 1
     % Compute Where You Want to Apply Force
     xMin = 0.1;
     xMax = 0.16;
-    yMin = 0.41;
-    yMax = 0.59;
+    yMin = 0.035;
+    yMax = 0.215;
     
     inds = give_Me_Indices_To_Apply_Force(x,y,xMin,xMax,yMin,yMax);
     first = 0;
@@ -166,7 +166,7 @@ function [fx_exts, fy_exts] = give_Me_Velocity_Target_External_Force_Density(t,d
 % inds: indices on the fluid grid for where to apply the arbitrary external force
 
 
-fx = zeros(Nx,Ny);         % Initialize storage for x-force density from EXTERNAL FORCES
+fx = zeros(Ny,Nx);         % Initialize storage for x-force density from EXTERNAL FORCES
 fy = fx;                   % Initialize storage for y-force density from EXTERNAL FORCES
 
 for n=1:length(inds(:,1))
@@ -211,7 +211,7 @@ function [uX_Tar,uY_Tar] = please_Give_Target_Velocity(t,dx,dy,xGrid,yGrid,Lx,Ly
 
 y = yGrid(j);  % y-Value considered
 
-uX_Tar = -Umax * (5*tanh(t)) * ( (Lx/2+w/2) - y )*( (Lx/2-w/2) - y ); % Only external forces in x-direction
+uX_Tar = -Umax * (5*tanh(t)) * ( (Ly/2+w/2) - ( y ) )*( (Ly/2-w/2) - ( y ) ); % Only external forces in x-direction
 uY_Tar = 0;                                                           % No external forces in y-direction
 
 

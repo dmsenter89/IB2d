@@ -7,31 +7,66 @@ IB2d is an Immersed Boundary Code (IB) for solving fully coupled non-linear
 	off of Peskin's Immersed Boundary Method Paper in Acta Numerica, 2002.
 
 Author: Nicholas A. Battista
-Email:  nick.battista@unc.edu
-Date Created: May 27th, 2015
-Institution: University of North Carolina at Chapel Hill
-Website: http://battista.web.unc.edu
+Institution: The College of New Jersey (TCNJ)
+Email:  battistn[at]tcnj.edu
+Website: http://battistn.pages.tcnj.edu
 GitHub: http://www.github.com/nickabattista
 
+HISTORY:
+Date Created: May 27th, 2015 by NAB
+Institution: University of North Carolina at Chapel Hill
+
+%*****************************************************************************%
+
+If you use this software for research, educational, or recreational purposed, please let Nick Battista know (battistn@tcnj.edu)
+
+If you use the code for research, please cite the following papers:
+[1] N.A. Battista, A.J. Baird, L.A. Miller, A Mathematical Model and MATLAB Code for Muscle-Fluid-Structure Simulations, Integr. Comp. Biol. 55 (2015), 901-911.
+[2] N.A. Battista, W.C. Strickland, L.A. Miller, IB2d a Python and MATLAB implementation of the immersed boundary method, Bioinspir. Biomim. 12(3):036003 (2017)
+[3] N.A. Battista, W.C. Strickland, A. Barrett, L.A. Miller, IB2d Reloaded: a more powerful Python and MATLAB implementation of the immersed boundary method, Math. Meth. App. Sci. 41(18):8455-8480 (2018)
+
+%*****************************************************************************%
+
+IB2d Video Tutorials:
+
+Tutorial 1: https://youtu.be/PJyQA0vwbgU
+An introduction to the immersed boundary method, fiber models, open source IB software, IB2d​, and some FSI examples!
+
+Tutorial 2: https://youtu.be/jSwCKq0v84s
+A tour of what comes with the IB2d software, how to download it, what Example subfolders contain and what input files are necessary to run a simulation
+
+Tutorial 3: https://youtu.be/I3TLpyEBXfE
+An overview of how to construct immersed boundary geometries and create the input files (.vertex, .spring, etc.) for an IB2d simulation to run using the oscillating rubberband example from Tutorial 2 as a guide.
+
+Tutorial 4: https://youtu.be/4D4ruXbeCiQ
+The basics of visualizing data using open source visualization software called VisIt (by Lawrence Livermore National Labs), visualizing the Lagrangian Points and Eulerian Data (colormaps for scalar data and vector fields for fluid velocity vectors)
+
+%*****************************************************************************%
+
+%%%%% FOR PYTHON SPECIFIC INSTRUCTIONS, PLEASE SEE README IN pyIB2d %%%%%
+
 This code is capable of creating Lagrangian Structures using:
- 	1. Springs
- 	2. Beams (*torsional springs)
+ 	1. Springs (* linear, non-linear, damped *)
+ 	2. Beams (*torsional springs or non-invariant beams *)
  	3. Target Points
 	4. Muscle-Model 1 (combined Force-Length-Velocity model with a 
                         Hill (i.e.,Length-Tension) Model )
         5. 3-Element Hill Muscle (combined 3-element hill mode coupled w/
                         Force-Velocity/Length-Tension Model)
         6. Mass Points (with or without influence of gravity)
-        7. Porous Structures 
+        7. Porous Structures (via Darcy’s Law) 
         8. Electrophysiology (FitzHugh-Nagumo coupling w/ or w/o calcium
 			dynamics and w/ or w/o muscle models)
-	9. Damped Springs
+	9. Non-invariant Beams
+	10. User-defined deformation laws
+        11. Poroelastic Media (based on Brinkman-like forces)
+        12. Coagulation / Aggregation models
 
 One is able to update those Lagrangian Structure Parameters, e.g., spring constants, resting lengths, etc
  
-There are a number of built in Examples, mostly used for teaching purposes. 
+There are a number of built in Examples (~70), mostly used for teaching purposes. 
 
-If you would like us to add a specific muscle model, please contact Nick (nick.battista@unc.edu) 
+If you would like us to add a specific muscle model, please contact Nick (nickabattista@gmail.edu) 
 
 If you use this code for the purposes of teaching, research, or recreation please let Nick know as well :)
 
@@ -140,6 +175,8 @@ If you use this code for the purposes of teaching, research, or recreation pleas
 
 -You can have a background concentration gradient that is advected and diffused
     via the background flow.
+
+-You can use the Boussinesq approximation
 
 -It can plot the following things in Matlab, if plot_Matlab flag = 1 in input2d:
     a. Vorticity (colormap) + Lagrangian Pts.
